@@ -13,6 +13,12 @@ find_package(catkin REQUIRED COMPONENTS
   wam_common
 )
 
+## libbarrett
+find_package(Barrett REQUIRED)
+include_directories(${BARRETT_INCLUDE_DIRS})
+link_directories(${BARRETT_LIBRARY_DIRS})
+add_definitions(${BARRETT_DEFINITIONS})
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -100,7 +106,6 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 	/usr/include/eigen2/
 	/usr/include/xenomai/
-	/home/benblumer/libbarrett-1.2.1/include
 )
 
 ## Declare a cpp library
@@ -173,10 +178,8 @@ include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(wam_node src/wam_node.cpp)
 # Added Barrett.
-target_link_libraries(wam_node ${catkin_LIBRARIES} /home/benblumer/libbarrett-1.2.1/src/libbarrett.so gsl)
+target_link_libraries(wam_node ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
 # Add the location of your Barrett lib.
-link_directories (
-home/benblumer/libbarrett-1.2.1/src
-)
+link_directories (BARRETT_LIBRARY_DIRS)
 
 
