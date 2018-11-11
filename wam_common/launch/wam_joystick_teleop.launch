@@ -1,0 +1,12 @@
+<launch>
+
+  <!-- joy node -->
+  <node name="joy" pkg="joy" type="joy" respawn="true">
+    <param name="dev" type="string" value="/dev/input/js0" />
+    <param name="deadzone" value="0.12" />
+  </node>
+
+  <!-- WAM Teleop Node -->
+  <node pkg="wam_teleop" type="wam_joystick_teleop" name="wam_joystick_teleop" output="screen"/>
+  
+</launch>
