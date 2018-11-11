@@ -69,11 +69,13 @@
 typedef tf::Quaternion btQuaternion;
 typedef tf::Matrix3x3 btMatrix3x3;
 
+using namespace barrett;
+
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
 static const int BHAND_PUBLISH_FREQ = 5; // Publishing Frequency for the BarretHand
 static const double SPEED = 0.03; // Default Cartesian Velocity
-
-using namespace barrett;
+static const double TORQUE_LIM = 3.0;
+static const double JP_VEL_LIM = 1.5;
 
 //Creating a templated multiplier for our real-time computation
 template<typename T1, typename T2, typename OutputType>
@@ -165,7 +167,7 @@ template<size_t DOF>
     double cart_vel_mag, ortn_vel_mag;
     systems::Wam<DOF>& wam;
     Hand* hand;
-    jp_type jp, jp_cmd, jp_home;
+    jp_type jp, jp_cmd, jp_home, jp_init;
     jp_type rt_jp_cmd, rt_jp_rl;
     jv_type rt_jv_cmd;
     cp_type cp_cmd, rt_cv_cmd;
@@ -227,9 +229,12 @@ template<size_t DOF>
     }
     void
     init(ProductManager& pm);
+    void
+    close(ProductManager& pm);
 
     ~WamNode()
     {
+      
     }
 
     bool
@@ -305,21 +310,32 @@ template<size_t DOF>
     pm.getExecutionManager()->startManaging(ramp); //starting ramp manager
 
     ROS_INFO(" \n %zu-DOF WAM", DOF);
-    jp_home = wam.getJointPositions();
+    // jp_home = wam.getJointPositions();
+
+    // Adjust the torque limits to allow for BarrettHand movements at extents
+    pm.getSafetyModule()->setTorqueLimit(TORQUE_LIM);
+    pm.getSafetyModule()->setVelocityLimit(JP_VEL_LIM);
+
+    // Define initialization position
+    jp_init[0] = 0.0;
+    jp_init[1] = -1.967;
+    jp_init[2] = 0.0;
+    jp_init[3] = 2.5;
+    jp_init[4] = 0.0;
+    jp_init[5] = -0.5;
+    jp_init[6] = 0.0;
+
+    usleep(500000);
+    wam.moveTo(jp_init);
 
     if (pm.foundHand()) //Does the following only if a BarrettHand is present
     {
       std::cout << "Barrett Hand" << std::endl;
       hand = pm.getHand();
 
-      // Adjust the torque limits to allow for BarrettHand movements at extents
-      pm.getSafetyModule()->setTorqueLimit(3.0);
-
       // Move j3 in order to give room for hand initialization
-      jp_type jp_init = wam.getJointPositions();
-      jp_init[3] -= 0.35;
-      usleep(500000);
-      wam.moveTo(jp_init);
+      // jp_type jp_init = wam.getJointPositions();
+      // jp_init[3] -= 0.35;
 
       usleep(500000);
       hand->initialize();
@@ -383,6 +399,24 @@ template<size_t DOF>
 
   }
 
+template<size_t DOF>
+  void WamNode<DOF>::close(ProductManager& pm)
+  {
+    if (hand != NULL)
+    {
+      hand->open(Hand::GRASP, true);
+      hand->close(Hand::SPREAD, true);
+      hand->idle();
+    }
+
+    wam.moveTo(jp_init);
+    wam.moveHome();
+  
+    printf("Please Shift-Idle the WAM...");
+    pm.getSafetyModule()->waitForMode(SafetyModule::IDLE);
+  }
+
+
 // gravity_comp service callback
 template<size_t DOF>
   bool WamNode<DOF>::gravity(wam_common::GravityComp::Request &req, wam_common::GravityComp::Response &res)
@@ -403,13 +437,19 @@ template<size_t DOF>
       hand->open(Hand::GRASP, true);
       hand->close(Hand::SPREAD, true);
     }
-    for (size_t i = 0; i < DOF; i++)
-      jp_cmd[i] = 0.0;
-    wam.moveTo(jp_cmd, true);
-    jp_home[3] -= 0.3;
-    wam.moveTo(jp_home, true);
-    jp_home[3] += 0.3;
-    wam.moveTo(jp_home, true);
+    
+    wam.moveTo(jp_init);
+    wam.moveHome();
+
+    // for (size_t i = 0; i < DOF; i++)
+    //   jp_cmd[i] = 0.0;
+    
+    // wam.moveTo(jp_cmd, true);
+    // jp_home[3] -= 0.3;
+    // wam.moveTo(jp_home, true);
+    // jp_home[3] += 0.3;
+    // wam.moveTo(jp_home, true);
+
     return true;
   }
 
@@ -902,11 +942,21 @@ template<size_t DOF>
 
     while (ros::ok() && pm.getSafetyModule()->getMode() == SafetyModule::ACTIVE)
     {
-      ros::spinOnce();
-      wam_node.publishWam(pm);
-      wam_node.updateRT(pm);
-      pub_rate.sleep();
+      try
+      {
+        ros::spinOnce();
+        wam_node.publishWam(pm);
+        wam_node.updateRT(pm);
+        pub_rate.sleep();
+      }
+      catch (const std::exception &e)
+      {
+        ROS_ERROR_STREAM(e.what());
+      }
     }
+
+    // Safe close
+    wam_node.close(pm);
 
     return 0;
   }
