@@ -74,8 +74,8 @@ using namespace barrett;
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
 static const int BHAND_PUBLISH_FREQ = 5; // Publishing Frequency for the BarretHand
 static const double SPEED = 0.03; // Default Cartesian Velocity
-static const double TORQUE_LIM = 3.0;
-static const double JP_VEL_LIM = 1.5;
+static const double TORQUE_LIM = 1.5;
+static const double JP_VEL_LIM = 1.0;
 
 //Creating a templated multiplier for our real-time computation
 template<typename T1, typename T2, typename OutputType>
@@ -161,12 +161,16 @@ template<size_t DOF>
   class WamNode
   {
     BARRETT_UNITS_TEMPLATE_TYPEDEFS(DOF);
+
+    typedef barrett::Hand::jp_type hjp_type;
+
   protected:
     bool cart_vel_status, ortn_vel_status, jnt_vel_status;
     bool jnt_pos_status, cart_pos_status, ortn_pos_status, new_rt_cmd;
     double cart_vel_mag, ortn_vel_mag;
     systems::Wam<DOF>& wam;
     Hand* hand;
+    hjp_type hjp_init;
     jp_type jp, jp_cmd, jp_home, jp_init;
     jp_type rt_jp_cmd, rt_jp_rl;
     jv_type rt_jv_cmd;
@@ -234,7 +238,7 @@ template<size_t DOF>
 
     ~WamNode()
     {
-      
+
     }
 
     bool
@@ -333,13 +337,17 @@ template<size_t DOF>
       std::cout << "Barrett Hand" << std::endl;
       hand = pm.getHand();
 
-      // Move j3 in order to give room for hand initialization
-      // jp_type jp_init = wam.getJointPositions();
-      // jp_init[3] -= 0.35;
-
       usleep(500000);
       hand->initialize();
+      // Update state & sensor measurements
       hand->update();
+      hand->open();
+
+      hjp_init[0] = 1.2;
+      hjp_init[1] = 1.2;
+      hjp_init[2] = 1.2;
+      hjp_init[3] = 0;
+      hand->trapezoidalMove(hjp_init);
 
       //Publishing the following topics only if there is a BarrettHand present
       bhand_joint_state_pub = nh_.advertise < sensor_msgs::JointState > ("joint_states", 1); // bhand/joint_states
@@ -432,23 +440,15 @@ template<size_t DOF>
   {
     ROS_INFO("Returning to Home Position");
 
+    wam.moveTo(jp_init);
+
     if (hand != NULL)
     {
       hand->open(Hand::GRASP, true);
       hand->close(Hand::SPREAD, true);
     }
     
-    wam.moveTo(jp_init);
     wam.moveHome();
-
-    // for (size_t i = 0; i < DOF; i++)
-    //   jp_cmd[i] = 0.0;
-    
-    // wam.moveTo(jp_cmd, true);
-    // jp_home[3] -= 0.3;
-    // wam.moveTo(jp_home, true);
-    // jp_home[3] += 0.3;
-    // wam.moveTo(jp_home, true);
 
     return true;
   }
@@ -728,6 +728,7 @@ template<size_t DOF>
   {
     if (cart_pos_status)
     {
+      std::cout << "cart_pos_status = true" << std::endl;
       for (size_t i = 0; i < 3; i++)
       {
         rt_cp_cmd[i] = msg->position[i];
@@ -823,6 +824,7 @@ template<size_t DOF>
       }
       cart_vel_status = true;
       new_rt_cmd = false;
+
     }
 
     //Real-Time Angular Velocity Control Portion
@@ -902,10 +904,13 @@ template<size_t DOF>
     {
       if (!cart_pos_status)
       {
+        // set initial value to current position
         cp_track.setValue(wam.getToolPosition());
         current_ortn.setValue(wam.getToolOrientation()); // Initializing the orientation
         cp_rl.setLimit(rt_cp_rl);
         systems::forceConnect(cp_track.output, cp_rl.input);
+
+        // rt_pose_cmd is TupleGrouper of cp_type and Quaternion
         systems::forceConnect(cp_rl.output, rt_pose_cmd.getInput<0>()); // saving the rate limited cartesian position command to the pose.position
         systems::forceConnect(current_ortn.output, rt_pose_cmd.getInput<1>()); // saving the original orientation to the pose.orientation
         wam.trackReferenceSignal(rt_pose_cmd.output); //Commanding the WAM to track the real-time pose command.
@@ -948,7 +953,7 @@ template<size_t DOF>
         wam_node.publishWam(pm);
         wam_node.updateRT(pm);
         pub_rate.sleep();
-      }
+        }
       catch (const std::exception &e)
       {
         ROS_ERROR_STREAM(e.what());
