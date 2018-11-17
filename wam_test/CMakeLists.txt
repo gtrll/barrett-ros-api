@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(wam_node)
+project(wam_test)
 
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED COMPONENTS
@@ -39,8 +39,11 @@ include_directories(
 
 include_directories(include ${catkin_INCLUDE_DIRS})
 
-add_executable(wam_node src/wam_node.cpp)
-target_link_libraries(wam_node ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
+add_executable(wam_cart_test src/wam_cartTraj_test.cpp)
+target_link_libraries(wam_cart_test ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
+
+add_executable(wam_joint_test src/wam_jointTraj_test.cpp)
+target_link_libraries(wam_joint_test ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
 
 link_directories (BARRETT_LIBRARY_DIRS)
 

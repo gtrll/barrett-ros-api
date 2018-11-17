@@ -1,0 +1,4 @@
+<launch>
+  <node name="wam_spline" type="wam_spline" pkg="wam_node" output="screen" />
+</launch>
+

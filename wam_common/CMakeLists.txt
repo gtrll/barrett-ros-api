@@ -48,13 +48,8 @@ find_package(catkin REQUIRED COMPONENTS
 # Generate messages in the 'msg' folder
  add_message_files(
    FILES
-   RTCartPos.msg
-   RTCartVel.msg
-   RTJointPos.msg
-   RTJointVel.msg
-   RTOrtnPos.msg
-   RTOrtnVel.msg
-   RTPose.msg
+   CartPointTraj.msg
+   JointTraj.msg
   )
 
 # Generate services in the 'srv' folder

@@ -25,23 +25,18 @@
  Date: 5 June, 2012
  Author: Kyle Maroney
  */
-
-/*Made catkin compatible and newer ROS friendly by Benjamin Blumer */
 #include <unistd.h>
 #include <math.h>
 
 #include <boost/thread.hpp> // BarrettHand threading
 #include <boost/bind.hpp>
+#include <Eigen/Core>
 
 #include "ros/ros.h"
 #include "tf/transform_datatypes.h"
 
-#include "wam_common/RTJointPos.h"
-#include "wam_common/RTJointVel.h"
-#include "wam_common/RTCartPos.h"
-#include "wam_common/RTCartVel.h"
-#include "wam_common/RTOrtnPos.h"
-#include "wam_common/RTOrtnVel.h"
+#include "wam_common/CartPointTraj.h"
+#include "wam_common/JointTraj.h"
 #include "wam_common/GravityComp.h"
 #include "wam_common/Hold.h"
 #include "wam_common/JointMove.h"
@@ -73,88 +68,11 @@ using namespace barrett;
 
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
 static const int BHAND_PUBLISH_FREQ = 5; // Publishing Frequency for the BarretHand
-static const double SPEED = 0.03; // Default Cartesian Velocity
+static const double SPEED = 0.5; // Default Cartesian Velocity
 static const double TORQUE_LIM = 1.5;
 static const double JP_VEL_LIM = 1.0;
+static const double TRANSITION_DURATION = 0.5;  // seconds
 
-//Creating a templated multiplier for our real-time computation
-template<typename T1, typename T2, typename OutputType>
-  class Multiplier : public systems::System, public systems::SingleOutput<OutputType>
-  {
-  public:
-    Input<T1> input1;
-  public:
-    Input<T2> input2;
-
-  public:
-    Multiplier(std::string sysName = "Multiplier") :
-        systems::System(sysName), systems::SingleOutput<OutputType>(this), input1(this), input2(this)
-    {
-    }
-    virtual ~Multiplier()
-    {
-      mandatoryCleanUp();
-    }
-
-  protected:
-    OutputType data;
-    virtual void operate()
-    {
-      data = input1.getValue() * input2.getValue();
-      this->outputValue->setData(&data);
-    }
-
-  private:
-    DISALLOW_COPY_AND_ASSIGN(Multiplier);
-
-  public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  };
-
-//Creating a templated converter from Roll, Pitch, Yaw to Quaternion for real-time computation
-class ToQuaternion : public systems::SingleIO<math::Vector<3>::type, Eigen::Quaterniond>
-{
-public:
-  Eigen::Quaterniond outputQuat;
-
-public:
-  ToQuaternion(std::string sysName = "ToQuaternion") :
-      systems::SingleIO<math::Vector<3>::type, Eigen::Quaterniond>(sysName)
-  {
-  }
-  virtual ~ToQuaternion()
-  {
-    mandatoryCleanUp();
-  }
-
-protected:
-  btQuaternion q;
-  virtual void operate()
-  {
-    const math::Vector<3>::type &inputRPY = input.getValue();
-    q.setEulerZYX(inputRPY[2], inputRPY[1], inputRPY[0]);
-    outputQuat.x() = q.getX();
-    outputQuat.y() = q.getY();
-    outputQuat.z() = q.getZ();
-    outputQuat.w() = q.getW();
-    this->outputValue->setData(&outputQuat);
-  }
-
-private:
-  DISALLOW_COPY_AND_ASSIGN(ToQuaternion);
-
-public:
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
-
-//Simple Function for converting Quaternion to RPY
-math::Vector<3>::type toRPY(Eigen::Quaterniond inquat)
-{
-  math::Vector<3>::type newRPY;
-  btQuaternion q(inquat.x(), inquat.y(), inquat.z(), inquat.w());
-  btMatrix3x3(q).getEulerZYX(newRPY[2], newRPY[1], newRPY[0]);
-  return newRPY;
-}
 
 //WamNode Class
 template<size_t DOF>
@@ -162,53 +80,33 @@ template<size_t DOF>
   {
     BARRETT_UNITS_TEMPLATE_TYPEDEFS(DOF);
 
-    typedef barrett::Hand::jp_type hjp_type;
-
   protected:
-    bool cart_vel_status, ortn_vel_status, jnt_vel_status;
-    bool jnt_pos_status, cart_pos_status, ortn_pos_status, new_rt_cmd;
-    double cart_vel_mag, ortn_vel_mag;
+
+    typedef barrett::Hand::jp_type hjp_type;
+    typedef boost::tuple<double, jp_type> input_jp_type;
+    typedef boost::tuple<double, cp_type> input_cp_type;
+    typedef boost::tuple<double, Eigen::Quaterniond> input_quat_type;
+
+    std::vector<input_jp_type>* jpVec;
+    math::Spline<jp_type>* jpSpline;
+    systems::Callback<double, jp_type>* jpTrajectory;
+
+    std::vector<input_cp_type>* cpVec;
+    math::Spline<cp_type>* cpSpline;
+    systems::Callback<double, cp_type>* cpTrajectory;
+
     systems::Wam<DOF>& wam;
     Hand* hand;
     hjp_type hjp_init;
     jp_type jp, jp_cmd, jp_home, jp_init;
-    jp_type rt_jp_cmd, rt_jp_rl;
-    jv_type rt_jv_cmd;
     cp_type cp_cmd, rt_cv_cmd;
-    cp_type rt_cp_cmd, rt_cp_rl;
-    Eigen::Quaterniond ortn_cmd, rt_op_cmd, rt_op_rl;
+    Eigen::Quaterniond ortn_cmd;
     pose_type pose_cmd;
-    math::Vector<3>::type rt_ortn_cmd;
-    systems::ExposedOutput<Eigen::Quaterniond> orientationSetPoint, current_ortn;
-    systems::ExposedOutput<cp_type> cart_dir, current_cart_pos, cp_track;
-    systems::ExposedOutput<math::Vector<3>::type> rpy_cmd, current_rpy_ortn;
-    systems::ExposedOutput<jv_type> jv_track;
-    systems::ExposedOutput<jp_type> jp_track;
-    systems::TupleGrouper<cp_type, Eigen::Quaterniond> rt_pose_cmd;
-    systems::Summer<cp_type> cart_pos_sum;
-    systems::Summer<math::Vector<3>::type> ortn_cmd_sum;
     systems::Ramp ramp;
-    systems::RateLimiter<jp_type> jp_rl;
-    systems::RateLimiter<cp_type> cp_rl;
-    Multiplier<double, cp_type, cp_type> mult_linear;
-    Multiplier<double, math::Vector<3>::type, math::Vector<3>::type> mult_angular;
-    ToQuaternion to_quat, to_quat_print;
-    Eigen::Quaterniond ortn_print;
-    ros::Time last_cart_vel_msg_time, last_ortn_vel_msg_time, last_jnt_vel_msg_time;
-    ros::Time last_jnt_pos_msg_time, last_cart_pos_msg_time, last_ortn_pos_msg_time;
-    ros::Duration rt_msg_timeout;
-
-    //Subscribed Topics
-    wam_common::RTCartVel cart_vel_cmd;
-    wam_common::RTOrtnVel ortn_vel_cmd;
 
     //Subscribers
-    ros::Subscriber cart_vel_sub;
-    ros::Subscriber ortn_vel_sub;
-    ros::Subscriber jnt_vel_sub;
-    ros::Subscriber jnt_pos_sub;
-    ros::Subscriber cart_pos_sub;
-    ros::Subscriber ortn_pos_sub;
+    ros::Subscriber cart_traj_sub;
+    ros::Subscriber joint_traj_sub;
 
     //Published Topics
     sensor_msgs::JointState wam_joint_state, bhand_joint_state;
@@ -218,8 +116,8 @@ template<size_t DOF>
     ros::Publisher wam_joint_state_pub, bhand_joint_state_pub, wam_pose_pub;
 
     //Services
-    ros::ServiceServer gravity_srv, go_home_srv, hold_jpos_srv, hold_cpos_srv;
-    ros::ServiceServer hold_ortn_srv, joint_move_srv, pose_move_srv;
+    ros::ServiceServer gravity_srv, go_home_srv, go_init_srv, hold_jpos_srv, hold_cpos_srv;
+    ros::ServiceServer joint_move_srv, pose_move_srv;
     ros::ServiceServer cart_move_srv, ortn_move_srv, hand_close_srv;
     ros::ServiceServer hand_open_grsp_srv, hand_close_grsp_srv, hand_open_sprd_srv;
     ros::ServiceServer hand_close_sprd_srv, hand_fngr_pos_srv, hand_fngr_vel_srv;
@@ -228,7 +126,8 @@ template<size_t DOF>
 
   public:
     WamNode(systems::Wam<DOF>& wam_) :
-        wam(wam_), hand(NULL), ramp(NULL, SPEED)
+        // wam(wam_), hand(NULL), ramp(NULL, SPEED)
+        wam(wam_), hand(NULL), ramp(NULL)
     {
     }
     void
@@ -246,11 +145,11 @@ template<size_t DOF>
     bool
     goHome(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
     bool
+    goInit(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res);
+    bool
     holdJPos(wam_common::Hold::Request &req, wam_common::Hold::Response &res);
     bool
     holdCPos(wam_common::Hold::Request &req, wam_common::Hold::Response &res);
-    bool
-    holdOrtn(wam_common::Hold::Request &req, wam_common::Hold::Response &res);
     bool
     jointMove(wam_common::JointMove::Request &req, wam_common::JointMove::Response &res);
     bool
@@ -280,15 +179,9 @@ template<size_t DOF>
     bool
     handSpreadVel(wam_common::BHandSpreadVel::Request &req, wam_common::BHandSpreadVel::Response &res);
     void
-    cartVelCB(const wam_common::RTCartVel::ConstPtr& msg);
+    cartTrajCB(const wam_common::CartPointTraj::ConstPtr& msg);
     void
-    ortnVelCB(const wam_common::RTOrtnVel::ConstPtr& msg);
-    void
-    jntVelCB(const wam_common::RTJointVel::ConstPtr& msg);
-    void
-    jntPosCB(const wam_common::RTJointPos::ConstPtr& msg);
-    void
-    cartPosCB(const wam_common::RTCartPos::ConstPtr& msg);
+    jointTrajCB(const wam_common::JointTraj::ConstPtr& msg);
     void
     publishWam(ProductManager& pm);
     void
@@ -304,17 +197,9 @@ template<size_t DOF>
     ros::NodeHandle n_("wam"); // WAM specific nodehandle
     ros::NodeHandle nh_("bhand"); // BarrettHand specific nodehandle
 
-    //Setting up real-time command timeouts and initial values
-    cart_vel_status = false; //Bool for determining cartesian velocity real-time state
-    ortn_vel_status = false; //Bool for determining orientation velocity real-time state
-    new_rt_cmd = false; //Bool for determining if a new real-time message was received
-    rt_msg_timeout.fromSec(0.3); //rt_status will be determined false if rt message is not received in specified time
-    cart_vel_mag = SPEED; //Setting default cartesian velocity magnitude to SPEED
-    ortn_vel_mag = SPEED;
     pm.getExecutionManager()->startManaging(ramp); //starting ramp manager
 
     ROS_INFO(" \n %zu-DOF WAM", DOF);
-    // jp_home = wam.getJointPositions();
 
     // Adjust the torque limits to allow for BarrettHand movements at extents
     pm.getSafetyModule()->setTorqueLimit(TORQUE_LIM);
@@ -383,33 +268,34 @@ template<size_t DOF>
     wam_joint_state.velocity.resize(DOF);
     wam_joint_state.effort.resize(DOF);
 
-    //Publishing the following rostopics
+    //Publishing the following rostopicss
     wam_joint_state_pub = n_.advertise < sensor_msgs::JointState > ("joint_states", 1); // wam/joint_states
     wam_pose_pub = n_.advertise < geometry_msgs::PoseStamped > ("pose", 1); // wam/pose
 
     //Subscribing to the following rostopics
-    cart_vel_sub = n_.subscribe("cart_vel_cmd", 1, &WamNode::cartVelCB, this); // wam/cart_vel_cmd
-    ortn_vel_sub = n_.subscribe("ortn_vel_cmd", 1, &WamNode::ortnVelCB, this); // wam/ortn_vel_cmd
-    jnt_vel_sub = n_.subscribe("jnt_vel_cmd", 1, &WamNode::jntVelCB, this); // wam/jnt_vel_cmd
-    jnt_pos_sub = n_.subscribe("jnt_pos_cmd", 1, &WamNode::jntPosCB, this); // wam/jnt_pos_cmd
-    cart_pos_sub = n_.subscribe("cart_pos_cmd", 1, &WamNode::cartPosCB, this); // wam/cart_pos_cmd
+    cart_traj_sub = n_.subscribe("cart_traj_cmd", 1, &WamNode::cartTrajCB, this); 
+    joint_traj_sub = n_.subscribe("joint_traj_cmd", 1, &WamNode::jointTrajCB, this); 
 
     //Advertising the following rosservices
     gravity_srv = n_.advertiseService("gravity_comp", &WamNode::gravity, this); // wam/gravity_comp
     go_home_srv = n_.advertiseService("go_home", &WamNode::goHome, this); // wam/go_home
+    go_init_srv = n_.advertiseService("go_init", &WamNode::goInit, this); // wam/go_home
     hold_jpos_srv = n_.advertiseService("hold_joint_pos", &WamNode::holdJPos, this); // wam/hold_joint_pos
     hold_cpos_srv = n_.advertiseService("hold_cart_pos", &WamNode::holdCPos, this); // wam/hold_cart_pos
-    hold_ortn_srv = n_.advertiseService("hold_ortn", &WamNode::holdOrtn, this); // wam/hold_ortn
     joint_move_srv = n_.advertiseService("joint_move", &WamNode::jointMove, this); // wam/joint_move
     pose_move_srv = n_.advertiseService("pose_move", &WamNode::poseMove, this); // wam/pose_move
     cart_move_srv = n_.advertiseService("cart_move", &WamNode::cartMove, this); // wam/cart_pos_move
     ortn_move_srv = n_.advertiseService("ortn_move", &WamNode::ortnMove, this); // wam/ortn_move
+
 
   }
 
 template<size_t DOF>
   void WamNode<DOF>::close(ProductManager& pm)
   {
+   
+    wam.moveTo(jp_init);
+
     if (hand != NULL)
     {
       hand->open(Hand::GRASP, true);
@@ -453,6 +339,16 @@ template<size_t DOF>
     return true;
   }
 
+template<size_t DOF>
+  bool WamNode<DOF>::goInit(std_srvs::Empty::Request &req, std_srvs::Empty::Response &res)
+  {
+    ROS_INFO("Returning to Home Position");
+
+    wam.moveTo(jp_init);
+
+    return true;
+  }
+
 //Function to hold WAM Joint Positions
 template<size_t DOF>
   bool WamNode<DOF>::holdJPos(wam_common::Hold::Request &req, wam_common::Hold::Response &res)
@@ -474,22 +370,6 @@ template<size_t DOF>
 
     if (req.hold)
       wam.moveTo(wam.getToolPosition());
-    else
-      wam.idle();
-    return true;
-  }
-
-//Function to hold WAM end effector Orientation
-template<size_t DOF>
-  bool WamNode<DOF>::holdOrtn(wam_common::Hold::Request &req, wam_common::Hold::Response &res)
-  {
-    ROS_INFO("Orientation Hold request: %s", (req.hold) ? "true" : "false");
-
-    if (req.hold)
-    {
-      orientationSetPoint.setValue(wam.getToolOrientation());
-      wam.trackReferenceSignal(orientationSetPoint.output);
-    }
     else
       wam.idle();
     return true;
@@ -526,6 +406,7 @@ template<size_t DOF>
     ortn_cmd.w() = req.pose.orientation.w;
 
     pose_cmd = boost::make_tuple(cp_cmd, ortn_cmd);
+    /* Sasha: test this. */
 
     //wam.moveTo(pose_cmd, false); //(TODO:KM Update Libbarrett API for Pose Moves)
     ROS_INFO("Pose Commands for WAM not yet supported by API");
@@ -652,91 +533,101 @@ template<size_t DOF>
     return true;
   }
 
-//Callback function for RT Cartesian Velocity messages
+//Callback function for joint Time-Parameterized Position Messages
 template<size_t DOF>
-  void WamNode<DOF>::cartVelCB(const wam_common::RTCartVel::ConstPtr& msg)
+  void WamNode<DOF>::jointTrajCB(const wam_common::JointTraj::ConstPtr& msg)
   {
-    if (cart_vel_status)
-    {
-      for (size_t i = 0; i < 3; i++)
-        rt_cv_cmd[i] = msg->direction[i];
-      new_rt_cmd = true;
-      if (msg->magnitude != 0)
-        cart_vel_mag = msg->magnitude;
+
+    assert(msg->time.size()==msg->j1.size());
+    assert(msg->time.size()==msg->j2.size());
+    assert(msg->time.size()==msg->j3.size());
+    assert(msg->time.size()==msg->j4.size());
+    assert(msg->time.size()==msg->j5.size());
+    assert(msg->time.size()==msg->j6.size());
+    assert(msg->time.size()==msg->j7.size());
+
+    size_t n_pts = msg->time.size();
+
+    jpVec = new std::vector<input_jp_type>;
+    input_jp_type jpSamp;
+
+    for (size_t i = 0; i < n_pts; i++)
+    {     
+      boost::get<0>(jpSamp) = msg->time[i];
+      boost::get<1>(jpSamp) << msg->j1[i], msg->j2[i], msg->j3[i], msg->j4[i], msg->j5[i], msg->j6[i], msg->j7[i];
+      jpVec->push_back(jpSamp);
+      // std::cout << "t : " << boost::get<0>((*jpVec)[i]) << std::endl;
+      // std::cout << "j1 : " << boost::get<1>((*jpVec)[i])[0] << std::endl;
+      // std::cout << "j2 : " << boost::get<1>((*jpVec)[i])[1] << std::endl;
+      // std::cout << "j3 : " << boost::get<1>((*jpVec)[i])[2] << std::endl;
+      // std::cout << "j4 : " << boost::get<1>((*jpVec)[i])[3] << std::endl;
+      // std::cout << "j5 : " << boost::get<1>((*jpVec)[i])[4] << std::endl;
+      // std::cout << "j6 : " << boost::get<1>((*jpVec)[i])[5] << std::endl;
+      // std::cout << "j7 : " << boost::get<1>((*jpVec)[i])[6] << std::endl;
+      // std::cout << "" << std::endl;
     }
-    last_cart_vel_msg_time = ros::Time::now();
+
+    jpSpline = new math::Spline<jp_type>(*jpVec);
+    jpTrajectory = new systems::Callback<double, jp_type>(boost::ref(*jpSpline));
+    systems::forceConnect(ramp.output, jpTrajectory->input);
+
+    ramp.stop();
+    ramp.reset();
+    ramp.setOutput(jpSpline->initialS());
+    wam.trackReferenceSignal(jpTrajectory->output);
+
+    ramp.start();
+    // ramp.smoothStart(TRANSITION_DURATION);
+    
+    while (jpTrajectory->input.getValue() < jpSpline->finalS()) {
+      usleep(100000);
+    }
 
   }
 
-//Callback function for RT Orientation Velocity Messages
-template<size_t DOF>
-  void WamNode<DOF>::ortnVelCB(const wam_common::RTOrtnVel::ConstPtr& msg)
-  {
-    if (ortn_vel_status)
-    {
-      for (size_t i = 0; i < 3; i++)
-        rt_ortn_cmd[i] = msg->angular[i];
-      new_rt_cmd = true;
-      if (msg->magnitude != 0)
-        ortn_vel_mag = msg->magnitude;
-    }
-    last_ortn_vel_msg_time = ros::Time::now();
-  }
 
-//Callback function for RT Joint Velocity Messages
+//Callback function for Cartesian Time-Parameterized Position Messages
 template<size_t DOF>
-  void WamNode<DOF>::jntVelCB(const wam_common::RTJointVel::ConstPtr& msg)
+  void WamNode<DOF>::cartTrajCB(const wam_common::CartPointTraj::ConstPtr& msg)
   {
-    if (msg->velocities.size() != DOF)
-    {
-      ROS_INFO("Commanded Joint Velocities != DOF of WAM");
-      return;
-    }
-    if (jnt_vel_status)
-    {
-      for (size_t i = 0; i < DOF; i++)
-        rt_jv_cmd[i] = msg->velocities[i];
-      new_rt_cmd = true;
-    }
-    last_jnt_vel_msg_time = ros::Time::now();
-  }
 
-//Callback function for RT Joint Position Messages
-template<size_t DOF>
-  void WamNode<DOF>::jntPosCB(const wam_common::RTJointPos::ConstPtr& msg)
-  {
-    if (msg->joints.size() != DOF)
-    {
-      ROS_INFO("Commanded Joint Positions != DOF of WAM");
-      return;
-    }
-    if (jnt_pos_status)
-    {
-      for (size_t i = 0; i < DOF; i++)
-      {
-        rt_jp_cmd[i] = msg->joints[i];
-        rt_jp_rl[i] = msg->rate_limits[i];
-      }
-      new_rt_cmd = true;
-    }
-    last_jnt_pos_msg_time = ros::Time::now();
-  }
+    assert(msg->time.size()==msg->x.size());
+    assert(msg->time.size()==msg->y.size());
+    assert(msg->time.size()==msg->z.size());
 
-//Callback function for RT Cartesian Position Messages
-template<size_t DOF>
-  void WamNode<DOF>::cartPosCB(const wam_common::RTCartPos::ConstPtr& msg)
-  {
-    if (cart_pos_status)
-    {
-      std::cout << "cart_pos_status = true" << std::endl;
-      for (size_t i = 0; i < 3; i++)
-      {
-        rt_cp_cmd[i] = msg->position[i];
-        rt_cp_rl[i] = msg->rate_limits[i];
-      }
-      new_rt_cmd = true;
+    size_t n_pts = msg->time.size();
+
+    cpVec = new std::vector<input_cp_type>;
+    input_cp_type cpSamp;
+
+    for (size_t i = 0; i < n_pts; i++)
+    {     
+      boost::get<0>(cpSamp) = msg->time[i];
+      boost::get<1>(cpSamp) << msg->x[i], msg->y[i], msg->z[i];
+      cpVec->push_back(cpSamp);
+      // std::cout << "t : " << boost::get<0>((*cpVec)[i]) << std::endl;
+      // std::cout << "x : " << boost::get<1>((*cpVec)[i])[0] << std::endl;
+      // std::cout << "y : " << boost::get<1>((*cpVec)[i])[1] << std::endl;
+      // std::cout << "z : " << boost::get<1>((*cpVec)[i])[2] << std::endl;
+      // std::cout << "" << std::endl;
     }
-    last_cart_pos_msg_time = ros::Time::now();
+
+    cpSpline = new math::Spline<cp_type>(*cpVec);
+    cpTrajectory = new systems::Callback<double, cp_type>(boost::ref(*cpSpline));
+    systems::forceConnect(ramp.output, cpTrajectory->input);
+
+    ramp.stop();
+    ramp.reset();
+    ramp.setOutput(cpSpline->initialS());
+    wam.trackReferenceSignal(cpTrajectory->output);
+
+    ramp.start();
+    // ramp.smoothStart(TRANSITION_DURATION);
+    
+    while (cpTrajectory->input.getValue() < cpSpline->finalS()) {
+      usleep(100000);
+    }
+
   }
 
 //Function to update the WAM publisher
@@ -791,146 +682,6 @@ template<size_t DOF>
     }
   }
 
-//Function to update the real-time control loops
-template<size_t DOF>
-  void WamNode<DOF>::updateRT(ProductManager& pm) //systems::PeriodicDataLogger<debug_tuple>& logger
-  {
-    //Real-Time Cartesian Velocity Control Portion
-    if (last_cart_vel_msg_time + rt_msg_timeout > ros::Time::now()) // checking if a cartesian velocity message has been published and if it is within timeout
-    {
-      if (!cart_vel_status)
-      {
-        cart_dir.setValue(cp_type(0.0, 0.0, 0.0)); // zeroing the cartesian direction
-        current_cart_pos.setValue(wam.getToolPosition()); // Initializing the cartesian position
-        current_ortn.setValue(wam.getToolOrientation()); // Initializing the orientation
-        systems::forceConnect(ramp.output, mult_linear.input1); // connecting the ramp to multiplier
-        systems::forceConnect(cart_dir.output, mult_linear.input2); // connecting the direction to the multiplier
-        systems::forceConnect(mult_linear.output, cart_pos_sum.getInput(0)); // adding the output of the multiplier
-        systems::forceConnect(current_cart_pos.output, cart_pos_sum.getInput(1)); // with the starting cartesian position offset
-        systems::forceConnect(cart_pos_sum.output, rt_pose_cmd.getInput<0>()); // saving summed position as new commanded pose.position
-        systems::forceConnect(current_ortn.output, rt_pose_cmd.getInput<1>()); // saving the original orientation to the pose.orientation
-        ramp.setSlope(cart_vel_mag); // setting the slope to the commanded magnitude
-        ramp.stop(); // ramp is stopped on startup
-        ramp.setOutput(0.0); // ramp is re-zeroed on startup
-        ramp.start(); // start the ramp
-        wam.trackReferenceSignal(rt_pose_cmd.output); // command WAM to track the RT commanded (500 Hz) updated pose
-      }
-      else if (new_rt_cmd)
-      {
-        ramp.reset(); // reset the ramp to 0
-        ramp.setSlope(cart_vel_mag);
-        cart_dir.setValue(rt_cv_cmd); // set our cartesian direction to subscribed command
-        current_cart_pos.setValue(wam.tpoTpController.referenceInput.getValue()); // updating the current position to the actual low level commanded value
-      }
-      cart_vel_status = true;
-      new_rt_cmd = false;
-
-    }
-
-    //Real-Time Angular Velocity Control Portion
-    else if (last_ortn_vel_msg_time + rt_msg_timeout > ros::Time::now()) // checking if a orientation velocity message has been published and if it is within timeout
-    {
-      if (!ortn_vel_status)
-      {
-        rpy_cmd.setValue(math::Vector<3>::type(0.0, 0.0, 0.0)); // zeroing the rpy command
-        current_cart_pos.setValue(wam.getToolPosition()); // Initializing the cartesian position
-        current_rpy_ortn.setValue(toRPY(wam.getToolOrientation())); // Initializing the orientation
-
-        systems::forceConnect(ramp.output, mult_angular.input1); // connecting the ramp to multiplier
-        systems::forceConnect(rpy_cmd.output, mult_angular.input2); // connecting the rpy command to the multiplier
-        systems::forceConnect(mult_angular.output, ortn_cmd_sum.getInput(0)); // adding the output of the multiplier
-        systems::forceConnect(current_rpy_ortn.output, ortn_cmd_sum.getInput(1)); // with the starting rpy orientation offset
-        systems::forceConnect(ortn_cmd_sum.output, to_quat.input);
-        systems::forceConnect(current_cart_pos.output, rt_pose_cmd.getInput<0>()); // saving the original position to the pose.position
-        systems::forceConnect(to_quat.output, rt_pose_cmd.getInput<1>()); // saving the summed and converted new quaternion commmand as the pose.orientation
-        ramp.setSlope(ortn_vel_mag); // setting the slope to the commanded magnitude
-        ramp.stop(); // ramp is stopped on startup
-        ramp.setOutput(0.0); // ramp is re-zeroed on startup
-        ramp.start(); // start the ramp
-        wam.trackReferenceSignal(rt_pose_cmd.output); // command the WAM to track the RT commanded up to (500 Hz) cartesian velocity
-      }
-      else if (new_rt_cmd)
-      {
-        ramp.reset(); // reset the ramp to 0
-        ramp.setSlope(ortn_vel_mag); // updating the commanded angular velocity magnitude
-        rpy_cmd.setValue(rt_ortn_cmd); // set our angular rpy command to subscribed command
-        current_rpy_ortn.setValue(toRPY(wam.tpoToController.referenceInput.getValue())); // updating the current orientation to the actual low level commanded value
-      }
-      ortn_vel_status = true;
-      new_rt_cmd = false;
-    }
-
-    //Real-Time Joint Velocity Control Portion
-    else if (last_jnt_vel_msg_time + rt_msg_timeout > ros::Time::now()) // checking if a joint velocity message has been published and if it is within timeout
-    {
-      if (!jnt_vel_status)
-      {
-        jv_type jv_start;
-        for (size_t i = 0; i < DOF; i++)
-          jv_start[i] = 0.0;
-        jv_track.setValue(jv_start); // zeroing the joint velocity command
-        wam.trackReferenceSignal(jv_track.output); // command the WAM to track the RT commanded up to (500 Hz) joint velocities
-      }
-      else if (new_rt_cmd)
-      {
-        jv_track.setValue(rt_jv_cmd); // set our joint velocity to subscribed command
-      }
-      jnt_vel_status = true;
-      new_rt_cmd = false;
-    }
-
-    //Real-Time Joint Position Control Portion
-    else if (last_jnt_pos_msg_time + rt_msg_timeout > ros::Time::now()) // checking if a joint position message has been published and if it is within timeout
-    {
-      if (!jnt_pos_status)
-      {
-        jp_type jp_start = wam.getJointPositions();
-        jp_track.setValue(jp_start); // setting initial the joint position command
-        jp_rl.setLimit(rt_jp_rl);
-        systems::forceConnect(jp_track.output, jp_rl.input);
-        wam.trackReferenceSignal(jp_rl.output); // command the WAM to track the RT commanded up to (500 Hz) joint positions
-      }
-      else if (new_rt_cmd)
-      {
-        jp_track.setValue(rt_jp_cmd); // set our joint position to subscribed command
-        jp_rl.setLimit(rt_jp_rl); // set our rate limit to subscribed rate to control the rate of the moves
-      }
-      jnt_pos_status = true;
-      new_rt_cmd = false;
-    }
-
-    //Real-Time Cartesian Position Control Portion
-    else if (last_cart_pos_msg_time + rt_msg_timeout > ros::Time::now()) // checking if a cartesian position message has been published and if it is within timeout
-    {
-      if (!cart_pos_status)
-      {
-        // set initial value to current position
-        cp_track.setValue(wam.getToolPosition());
-        current_ortn.setValue(wam.getToolOrientation()); // Initializing the orientation
-        cp_rl.setLimit(rt_cp_rl);
-        systems::forceConnect(cp_track.output, cp_rl.input);
-
-        // rt_pose_cmd is TupleGrouper of cp_type and Quaternion
-        systems::forceConnect(cp_rl.output, rt_pose_cmd.getInput<0>()); // saving the rate limited cartesian position command to the pose.position
-        systems::forceConnect(current_ortn.output, rt_pose_cmd.getInput<1>()); // saving the original orientation to the pose.orientation
-        wam.trackReferenceSignal(rt_pose_cmd.output); //Commanding the WAM to track the real-time pose command.
-      }
-      else if (new_rt_cmd)
-      {
-        cp_track.setValue(rt_cp_cmd); // Set our cartesian positions to subscribed command
-        cp_rl.setLimit(rt_cp_rl); // Updating the rate limit to subscribed rate to control the rate of the moves
-      }
-      cart_pos_status = true;
-      new_rt_cmd = false;
-    }
-
-    //If we fall out of 'Real-Time', hold joint positions
-    else if (cart_vel_status | ortn_vel_status | jnt_vel_status | jnt_pos_status | cart_pos_status)
-    {
-      wam.moveTo(wam.getJointPositions()); // Holds current joint positions upon a RT message timeout
-      cart_vel_status = ortn_vel_status = jnt_vel_status = jnt_pos_status = cart_pos_status = ortn_pos_status = false;
-    }
-  }
 
 //wam_main Function
 template<size_t DOF>
@@ -951,9 +702,8 @@ template<size_t DOF>
       {
         ros::spinOnce();
         wam_node.publishWam(pm);
-        wam_node.updateRT(pm);
         pub_rate.sleep();
-        }
+      }
       catch (const std::exception &e)
       {
         ROS_ERROR_STREAM(e.what());
@@ -962,6 +712,5 @@ template<size_t DOF>
 
     // Safe close
     wam_node.close(pm);
-
     return 0;
   }

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>wam_node</name>
+  <name>wam_test</name>
   <version>0.0.0</version>
   <description>The wam_node package</description>
 
