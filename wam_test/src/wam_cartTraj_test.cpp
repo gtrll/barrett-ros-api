@@ -66,7 +66,7 @@ int main(int argc, char** argv)
 	pointGoal.push_back(cposePtr->pose.position.y+0.5);
 	pointGoal.push_back(cposePtr->pose.position.z);
 
-	std::vector<std::vector<double> > pointTraj = linspace(pointStart,pointGoal,T,dt)
+	std::vector<std::vector<double> > pointTraj = linspace(pointStart,pointGoal,T,dt);
 
 	wam_common::CartPointTraj cpTraj;
 	for (size_t i=0; i < pointTraj.size(); i++){
