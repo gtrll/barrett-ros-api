@@ -12,25 +12,8 @@ find_package(catkin REQUIRED COMPONENTS
   wam_common
 )
 
-## libbarrett
-find_package(Barrett REQUIRED)
-include_directories(${BARRETT_INCLUDE_DIRS})
-link_directories(${BARRETT_LIBRARY_DIRS})
-add_definitions(${BARRETT_DEFINITIONS})
+catkin_package()
 
-###################################
-## catkin specific configuration ##
-###################################
-catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES wam_node
-#  CATKIN_DEPENDS geometry_msgs roscpp rospy sensor_msgs std_srvs wam_common
-#  DEPENDS system_lib
-)
-
-###########
-## Build ##
-###########
 
 include_directories(
   ${catkin_INCLUDE_DIRS}
@@ -41,10 +24,10 @@ include_directories(
 include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(wam_cart_test src/wam_cartTraj_test.cpp)
-target_link_libraries(wam_cart_test ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
+target_link_libraries(wam_cart_test ${catkin_LIBRARIES} )
 
 add_executable(wam_joint_test src/wam_jointTraj_test.cpp)
-target_link_libraries(wam_joint_test ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
+target_link_libraries(wam_joint_test ${catkin_LIBRARIES})
 
 link_directories (BARRETT_LIBRARY_DIRS)
 
