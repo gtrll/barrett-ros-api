@@ -29,6 +29,4 @@ target_link_libraries(wam_cart_test ${catkin_LIBRARIES} )
 add_executable(wam_joint_test src/wam_jointTraj_test.cpp)
 target_link_libraries(wam_joint_test ${catkin_LIBRARIES})
 
-link_directories (BARRETT_LIBRARY_DIRS)
-
 
