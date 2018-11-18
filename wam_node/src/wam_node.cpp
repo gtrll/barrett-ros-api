@@ -52,6 +52,7 @@
 #include "std_srvs/Empty.h"
 #include "sensor_msgs/JointState.h"
 #include "geometry_msgs/PoseStamped.h"
+#include "trajectory_msgs/JointTrajectory.h"
 
 #include <barrett/math.h> 
 #include <barrett/units.h>
@@ -181,7 +182,7 @@ template<size_t DOF>
     void
     cartTrajCB(const wam_common::CartPointTraj::ConstPtr& msg);
     void
-    jointTrajCB(const wam_common::JointTraj::ConstPtr& msg);
+    jointTrajCB(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
     void
     publishWam(ProductManager& pm);
     void
@@ -535,26 +536,19 @@ template<size_t DOF>
 
 //Callback function for joint Time-Parameterized Position Messages
 template<size_t DOF>
-  void WamNode<DOF>::jointTrajCB(const wam_common::JointTraj::ConstPtr& msg)
+  void WamNode<DOF>::jointTrajCB(const trajectory_msgs::JointTrajectory::ConstPtr& msg)
   {
-
-    assert(msg->time.size()==msg->j1.size());
-    assert(msg->time.size()==msg->j2.size());
-    assert(msg->time.size()==msg->j3.size());
-    assert(msg->time.size()==msg->j4.size());
-    assert(msg->time.size()==msg->j5.size());
-    assert(msg->time.size()==msg->j6.size());
-    assert(msg->time.size()==msg->j7.size());
-
-    size_t n_pts = msg->time.size();
+    size_t n_pts = msg->points.size();
 
     jpVec = new std::vector<input_jp_type>;
     input_jp_type jpSamp;
 
     for (size_t i = 0; i < n_pts; i++)
     {     
-      boost::get<0>(jpSamp) = msg->time[i];
-      boost::get<1>(jpSamp) << msg->j1[i], msg->j2[i], msg->j3[i], msg->j4[i], msg->j5[i], msg->j6[i], msg->j7[i];
+      boost::get<0>(jpSamp) = msg->points[i].time_from_start.toSec();
+      for (size_t j = 0; j < DOF; j++) {
+        boost::get<1>(jpSamp)[j] = msg->points[i].positions[j];
+      }
       jpVec->push_back(jpSamp);
       // std::cout << "t : " << boost::get<0>((*jpVec)[i]) << std::endl;
       // std::cout << "j1 : " << boost::get<1>((*jpVec)[i])[0] << std::endl;

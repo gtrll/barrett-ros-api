@@ -1,6 +1,6 @@
 
 #include <ros/ros.h>
-#include "wam_common/JointTraj.h"
+#include "trajectory_msgs/JointTrajectory.h"
 #include "sensor_msgs/JointState.h"
 
 std::vector<std::vector<double> > linspace(std::vector<double> pointStart, std::vector<double> pointGoal, const double& T, const double& dt) {
@@ -37,38 +37,25 @@ int main(int argc, char** argv)
 {
 	ros::init(argc, argv, "wam_test");
 	ros::NodeHandle nh;
-	ros::Publisher pub = nh.advertise<wam_common::JointTraj>("/wam/joint_traj_cmd",10);
+	ros::Publisher pub = nh.advertise<trajectory_msgs::JointTrajectory>("/wam/joint_traj_cmd",10);
 
 	ros::Duration(1.0).sleep();
 
+	size_t DOF = 7;
 	double dt = 0.5; // time interval (s)
-	// double dt = 0.02; // time interval (s)
-	double T = 3.0; //trajectory duration (s)
+	double T = 5.0; //trajectory duration (s)
 
-	// Get current cartes. pose
+	// Get current joint position
 	boost::shared_ptr<sensor_msgs::JointState const> jpPtr;
 	jpPtr = ros::topic::waitForMessage <sensor_msgs::JointState> ("/wam/joint_states",ros::Duration(10));
 
-	// std::cout << "Pose Message received." << std::endl;
-	// std::cout << "Position: " << std::endl;
-	// std::cout << "x : " << cposePtr->pose.position.x << std::endl;
-	// std::cout << "y : " << cposePtr->pose.position.y << std::endl;
-	// std::cout << "z : " << cposePtr->pose.position.z << std::endl;
-	// std::cout << "Orientation: " << std::endl;
-	// std::cout << "x : " << cposePtr->pose.orientation.x << std::endl;
-	// std::cout << "y : " << cposePtr->pose.orientation.y << std::endl;
-	// std::cout << "z : " << cposePtr->pose.orientation.z << std::endl;
-	// std::cout << "w : " << cposePtr->pose.orientation.w << std::endl;
-
+	// Set start to current
 	std::vector<double> pointStart;
-	pointStart.push_back(jpPtr->position[0]);
-	pointStart.push_back(jpPtr->position[1]);
-	pointStart.push_back(jpPtr->position[2]);
-	pointStart.push_back(jpPtr->position[3]);
-	pointStart.push_back(jpPtr->position[4]);
-	pointStart.push_back(jpPtr->position[5]);
-	pointStart.push_back(jpPtr->position[6]);
+	for (size_t j=0; j<DOF; j++) 
+		pointStart.push_back(jpPtr->position[j]);
+	
 
+	// Set goal joint pos
 	std::vector<double> pointGoal;
 	pointGoal.push_back(-0.39598);
 	pointGoal.push_back(-1.72859);
@@ -78,28 +65,26 @@ int main(int argc, char** argv)
 	pointGoal.push_back(-0.78612);
 	pointGoal.push_back(0.040789);
 
+	// Get linear sequence of waypoints
 	std::vector<std::vector<double> > pointTraj = linspace(pointStart,pointGoal,T,dt);
 
-	wam_common::JointTraj jpTraj;
-	for (size_t i=0; i < pointTraj.size(); i++){
-		jpTraj.time.push_back(pointTraj[i][0]);
-		jpTraj.j1.push_back(pointTraj[i][1]);
-		jpTraj.j2.push_back(pointTraj[i][2]);
-		jpTraj.j3.push_back(pointTraj[i][3]);
-		jpTraj.j4.push_back(pointTraj[i][4]);
-		jpTraj.j5.push_back(pointTraj[i][5]);
-		jpTraj.j6.push_back(pointTraj[i][6]);
-		jpTraj.j7.push_back(pointTraj[i][7]);
+	// Populate msg
+	trajectory_msgs::JointTrajectory jpTraj;
+	jpTraj.points.resize(pointTraj.size());
 
-		std::cout << i << "," << 
-		pointTraj[i][0] << "," << 
-		pointTraj[i][1] << "," << 
-		pointTraj[i][2] << "," << 
-		pointTraj[i][3] << "," << 
-		pointTraj[i][4] << "," << 
-		pointTraj[i][5] << "," << 
-		pointTraj[i][6] << "," << 
-		pointTraj[i][7] << "," << std::endl;
+	for (size_t i=0; i < pointTraj.size(); i++){
+		jpTraj.points[i].positions.resize(DOF);
+		jpTraj.points[i].time_from_start = ros::Duration(pointTraj[i][0]);
+		for (size_t j=0; j<DOF; j++)
+			jpTraj.points[i].positions[j]=pointTraj[i][j+1]; // time is first index
+		// std::cout << jpTraj.points[i].time_from_start.toSec() << ", " <<
+		// jpTraj.points[i].positions[0] << ", " <<
+		// jpTraj.points[i].positions[1] << ", " <<
+		// jpTraj.points[i].positions[2] << ", " <<
+		// jpTraj.points[i].positions[3] << ", " <<
+		// jpTraj.points[i].positions[4] << ", " <<
+		// jpTraj.points[i].positions[5] << ", " <<
+		// jpTraj.points[i].positions[6] << std::endl;
 	}
 
 	pub.publish(jpTraj);

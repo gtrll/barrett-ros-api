@@ -4,6 +4,7 @@ project(wam_test)
 ## Find catkin macros and libraries
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
+  trajectory_msgs
   roscpp
   rospy
   sensor_msgs
