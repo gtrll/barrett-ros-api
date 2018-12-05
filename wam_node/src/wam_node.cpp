@@ -251,7 +251,8 @@ template<size_t DOF>
       hand_sprd_vel_srv = nh_.advertiseService("spread_vel", &WamNode::handSpreadVel, this); // bhand/spread_vel
 
       //Set up the BarrettHand joint state publisher
-      const char* bhand_jnts[] = {"inner_f1", "inner_f2", "inner_f3", "spread", "outer_f1", "outer_f2", "outer_f3"};
+      // const char* bhand_jnts[] = {"inner_f1", "inner_f2", "inner_f3", "spread", "outer_f1", "outer_f2", "outer_f3"};
+      const char* bhand_jnts[] = {"bhand_f1_j1", "bhand_f2_j1", "bhand_f3_j1", "bhand_spread", "bhand_f1_j2", "bhand_f2_j2", "bhand_f3_j2"};
       std::vector < std::string > bhand_joints(bhand_jnts, bhand_jnts + 7);
       bhand_joint_state.name.resize(7);
       bhand_joint_state.name = bhand_joints;
