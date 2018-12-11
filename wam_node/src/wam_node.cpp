@@ -27,6 +27,8 @@
  */
 #include <unistd.h>
 #include <math.h>
+#include <ctime>
+#include <cstdlib>
 
 #include <boost/thread.hpp> // BarrettHand threading
 #include <boost/bind.hpp>
@@ -68,10 +70,13 @@ typedef tf::Matrix3x3 btMatrix3x3;
 using namespace barrett;
 
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
-static const int BHAND_PUBLISH_FREQ = 5; // Publishing Frequency for the BarretHand
-static const double SPEED = 0.5; // Default Cartesian Velocity
+// BHand publishing currently experiencing latency (65-75% of target Hz)
+static const int BHAND_PUBLISH_FREQ = 250; // Publishing Frequency for the BarretHand
+// static const double SPEED = 0.5; // Default Cartesian Velocity
+static const double SPEED = 0.2; // Default Cartesian Velocity
 static const double TORQUE_LIM = 1.5;
-static const double JP_VEL_LIM = 1.0;
+// static const double JP_VEL_LIM = 1.0;
+static const double JP_VEL_LIM = 0.5;
 static const double TRANSITION_DURATION = 0.5;  // seconds
 
 
@@ -227,12 +232,30 @@ template<size_t DOF>
       hand->initialize();
       // Update state & sensor measurements
       hand->update();
-      hand->open();
 
-      hjp_init[0] = 1.2;
-      hjp_init[1] = 1.2;
-      hjp_init[2] = 1.2;
-      hjp_init[3] = 0;
+      /* Default: mid-grasp */	
+      //hand->open();
+
+      //hjp_init[0] = 1.2;
+      //hjp_init[1] = 1.2;
+      //hjp_init[2] = 1.2;
+      //hjp_init[3] = 0;
+      //hand->trapezoidalMove(hjp_init);
+	
+      /* Push config */
+      hand->close(Hand::SPREAD);
+
+      //Hand::jp_type hi = hand->getInnerLinkPosition(); 
+      //Hand::jp_type ho = hand->getOuterLinkPosition();
+      //for (size_t i = 0; i < 4; i++)
+      //  hjp_init[i] = hi[i];
+      //for (size_t j = 0; j < 3; j++)
+      //  hjp_init[j + 4] = ho[j];
+
+      hjp_init[0] = 0.5;
+      hjp_init[1] = 2.4;
+      hjp_init[2] = 2.4;
+      hjp_init[3] = 3.1415;
       hand->trapezoidalMove(hjp_init);
 
       //Publishing the following topics only if there is a BarrettHand present
@@ -378,6 +401,7 @@ template<size_t DOF>
   }
 
 //Function to command a joint space move to the WAM
+/*** Blocking ****/
 template<size_t DOF>
   bool WamNode<DOF>::jointMove(wam_common::JointMove::Request &req, wam_common::JointMove::Response &res)
   {
@@ -389,7 +413,8 @@ template<size_t DOF>
     ROS_INFO("Moving Robot to Commanded Joint Pose");
     for (size_t i = 0; i < DOF; i++)
       jp_cmd[i] = req.joints[i];
-    wam.moveTo(jp_cmd, false);
+    wam.moveTo(jp_cmd, true);
+
     return true;
   }
 
@@ -536,13 +561,41 @@ template<size_t DOF>
   }
 
 //Callback function for joint Time-Parameterized Position Messages
+/*** Non-Blocking ***/
 template<size_t DOF>
   void WamNode<DOF>::jointTrajCB(const trajectory_msgs::JointTrajectory::ConstPtr& msg)
   {
+
+    // double t_start = highResolutionSystemTime();
+    // std::cout << "Start time: " << t_start << std::endl;
+
     size_t n_pts = msg->points.size();
 
     jpVec = new std::vector<input_jp_type>;
     input_jp_type jpSamp;
+
+    // Check if starting pos matches current
+    jp_type jp_curr = wam.getJointPositions();
+    for (size_t i = 0; i < DOF; i++)
+    {
+      if ( std::abs(jp_curr[i] - msg->points[0].positions[i]) > 1.0e-02) 
+      {
+        ROS_ERROR("Starting joint positions do not match! Dropping trajectory msg.");
+        return;
+
+        // Move to trajectory start
+        // ROS_INFO("Moving WAM to Trajectory Start.");
+        // jp_type jp_start;
+        
+        // for (size_t j = 0; j < DOF; j++) {
+        //   jp_start[j] = msg->points[0].positions[j];
+        // }
+        // wam.moveTo(jp_start,true);
+        // ROS_INFO("Reached start position.");
+
+        // break;
+      }
+    }
 
     for (size_t i = 0; i < n_pts; i++)
     {     
@@ -550,6 +603,7 @@ template<size_t DOF>
       for (size_t j = 0; j < DOF; j++) {
         boost::get<1>(jpSamp)[j] = msg->points[i].positions[j];
       }
+
       jpVec->push_back(jpSamp);
       // std::cout << "t : " << boost::get<0>((*jpVec)[i]) << std::endl;
       // std::cout << "j1 : " << boost::get<1>((*jpVec)[i])[0] << std::endl;
@@ -573,10 +627,9 @@ template<size_t DOF>
 
     ramp.start();
     // ramp.smoothStart(TRANSITION_DURATION);
-    
-    while (jpTrajectory->input.getValue() < jpSpline->finalS()) {
-      usleep(100000);
-    }
+
+    // double del_time = highResolutionSystemTime() - t_start;
+    // std::cout << "Exec. time: " << del_time << std::endl;
 
   }
 
@@ -600,11 +653,6 @@ template<size_t DOF>
       boost::get<0>(cpSamp) = msg->time[i];
       boost::get<1>(cpSamp) << msg->x[i], msg->y[i], msg->z[i];
       cpVec->push_back(cpSamp);
-      // std::cout << "t : " << boost::get<0>((*cpVec)[i]) << std::endl;
-      // std::cout << "x : " << boost::get<1>((*cpVec)[i])[0] << std::endl;
-      // std::cout << "y : " << boost::get<1>((*cpVec)[i])[1] << std::endl;
-      // std::cout << "z : " << boost::get<1>((*cpVec)[i])[2] << std::endl;
-      // std::cout << "" << std::endl;
     }
 
     cpSpline = new math::Spline<cp_type>(*cpVec);
