@@ -72,11 +72,10 @@ using namespace barrett;
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
 // BHand publishing currently experiencing latency (65-75% of target Hz)
 static const int BHAND_PUBLISH_FREQ = 250; // Publishing Frequency for the BarretHand
-// static const double SPEED = 0.5; // Default Cartesian Velocity
-static const double SPEED = 0.2; // Default Cartesian Velocity
+static const double SPEED = 0.5; // Default Cartesian Velocity
 static const double TORQUE_LIM = 1.5;
-// static const double JP_VEL_LIM = 1.0;
-static const double JP_VEL_LIM = 0.5;
+static const double JP_VEL_LIM = 1.0;
+// static const double JP_VEL_LIM = 0.5;
 static const double TRANSITION_DURATION = 0.5;  // seconds
 
 
@@ -570,50 +569,68 @@ template<size_t DOF>
     // std::cout << "Start time: " << t_start << std::endl;
 
     size_t n_pts = msg->points.size();
+    size_t i_start = 0;
 
     jpVec = new std::vector<input_jp_type>;
     input_jp_type jpSamp;
 
-    // Check if starting pos matches current
-    jp_type jp_curr = wam.getJointPositions();
-    for (size_t i = 0; i < DOF; i++)
-    {
-      if ( std::abs(jp_curr[i] - msg->points[0].positions[i]) > 1.0e-02) 
-      {
-        ROS_ERROR("Starting joint positions do not match! Dropping trajectory msg.");
-        return;
+    ROS_INFO("\n");
+    ROS_INFO("Joint Traj. message received.");
+    ROS_INFO("Time now: %15.5f",ros::Time::now().toSec());
+    ROS_INFO("Message time: %15.5f", msg->header.stamp.toSec());
+    ROS_INFO("Time diff: %15.5f \n", ros::Time::now().toSec() - msg->header.stamp.toSec());
 
-        // Move to trajectory start
-        // ROS_INFO("Moving WAM to Trajectory Start.");
-        // jp_type jp_start;
-        
-        // for (size_t j = 0; j < DOF; j++) {
-        //   jp_start[j] = msg->points[0].positions[j];
-        // }
-        // wam.moveTo(jp_start,true);
-        // ROS_INFO("Reached start position.");
+    // Skip traj points that are behind in time
+    // *** Make sure both pc's are synched (chrony) ***
+    // for (size_t i = 0; i < n_pts; i++) {
 
-        // break;
-      }
-    }
+    //   // Stamp set as planning start time by publisher (see piper interface)
+    //   ros::Time point_time = msg->header.stamp + msg->points[i].time_from_start;
 
-    for (size_t i = 0; i < n_pts; i++)
-    {     
+    //   ROS_INFO("Time now: %15.5f",ros::Time::now().toSec());
+    //   ROS_INFO("plan_start time: %15.5f", msg->header.stamp.toSec());
+    //   ROS_INFO("point %d time from start: %15.5f \n", int(i), msg->points[i].time_from_start.toSec());
+
+    //   if ( point_time.toSec() < ros::Time::now().toSec() ) 
+    //   {
+    //     i_start=i+1;
+    //     ROS_INFO_STREAM("Skipping traj. point: "<<i);
+    //   } 
+    //   else 
+    //   {
+    //     break;
+    //   }
+    // }
+
+    // Check start pos. matches current
+    //  jp_type jp_curr = wam.getJointPositions();
+    // for (size_t j = 0; j < DOF; j++)
+    // {
+    //   if ( std::abs(jp_curr[j] - msg->points[i_start].positions[j]) > 1.0e-02) 
+    //   {
+    //     ROS_ERROR("Starting joint positions do not match! Dropping trajectory msg.");
+    //     return;
+    //   }
+    // }   
+
+    for (size_t i = i_start; i < n_pts; i++)
+    {   
       boost::get<0>(jpSamp) = msg->points[i].time_from_start.toSec();
-      for (size_t j = 0; j < DOF; j++) {
-        boost::get<1>(jpSamp)[j] = msg->points[i].positions[j];
+      
+      if (i==i_start) {
+        //Replace starting point with current pos.
+        jp_type jp_curr = wam.getJointPositions();
+        for (size_t j = 0; j < DOF; j++) {
+          boost::get<1>(jpSamp)[j] = jp_curr[j];
+        }
+      }
+      else {
+        for (size_t j = 0; j < DOF; j++) {
+          boost::get<1>(jpSamp)[j] = msg->points[i].positions[j];
+        } 
       }
 
       jpVec->push_back(jpSamp);
-      // std::cout << "t : " << boost::get<0>((*jpVec)[i]) << std::endl;
-      // std::cout << "j1 : " << boost::get<1>((*jpVec)[i])[0] << std::endl;
-      // std::cout << "j2 : " << boost::get<1>((*jpVec)[i])[1] << std::endl;
-      // std::cout << "j3 : " << boost::get<1>((*jpVec)[i])[2] << std::endl;
-      // std::cout << "j4 : " << boost::get<1>((*jpVec)[i])[3] << std::endl;
-      // std::cout << "j5 : " << boost::get<1>((*jpVec)[i])[4] << std::endl;
-      // std::cout << "j6 : " << boost::get<1>((*jpVec)[i])[5] << std::endl;
-      // std::cout << "j7 : " << boost::get<1>((*jpVec)[i])[6] << std::endl;
-      // std::cout << "" << std::endl;
     }
 
     jpSpline = new math::Spline<jp_type>(*jpVec);
@@ -622,11 +639,13 @@ template<size_t DOF>
 
     ramp.stop();
     ramp.reset();
-    ramp.setOutput(jpSpline->initialS());
+    ramp.setOutput(jpSpline->initialS() );
     wam.trackReferenceSignal(jpTrajectory->output);
-
+    
+    ROS_INFO("Time diff. to ramp: %15.5f \n", ros::Time::now().toSec() - msg->header.stamp.toSec());
+   
     ramp.start();
-    // ramp.smoothStart(TRANSITION_DURATION);
+    // ramp.smoothStart(0.001);
 
     // double del_time = highResolutionSystemTime() - t_start;
     // std::cout << "Exec. time: " << del_time << std::endl;
@@ -659,13 +678,14 @@ template<size_t DOF>
     cpTrajectory = new systems::Callback<double, cp_type>(boost::ref(*cpSpline));
     systems::forceConnect(ramp.output, cpTrajectory->input);
 
-    ramp.stop();
+    // ramp.stop();
     ramp.reset();
     ramp.setOutput(cpSpline->initialS());
     wam.trackReferenceSignal(cpTrajectory->output);
 
     ramp.start();
     // ramp.smoothStart(TRANSITION_DURATION);
+    // ramp.smoothStart(0.0001);
     
     while (cpTrajectory->input.getValue() < cpSpline->finalS()) {
       usleep(100000);
