@@ -29,6 +29,7 @@
 #include <math.h>
 #include <ctime>
 #include <cstdlib>
+#include <fstream>
 
 #include <boost/thread.hpp> // BarrettHand threading
 #include <boost/bind.hpp>
@@ -63,12 +64,16 @@
 #include <barrett/standard_main_function.h>
 #include <barrett/systems/wam.h>
 #include <barrett/detail/stl_utils.h>
+#include <barrett/log.h>
+
+#include "sys_time.h"
 
 typedef tf::Quaternion btQuaternion;
 typedef tf::Matrix3x3 btMatrix3x3;
 
 using namespace barrett;
 
+static const bool LOG_DATA = true;
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
 // BHand publishing currently experiencing latency (65-75% of target Hz)
 static const int BHAND_PUBLISH_FREQ = 250; // Publishing Frequency for the BarretHand
@@ -91,6 +96,7 @@ template<size_t DOF>
     typedef boost::tuple<double, jp_type> input_jp_type;
     typedef boost::tuple<double, cp_type> input_cp_type;
     typedef boost::tuple<double, Eigen::Quaterniond> input_quat_type;
+    typedef boost::tuple<double, double, jp_type, jp_type, jv_type, jt_type> jpLog_tuple_type;  
 
     std::vector<input_jp_type>* jpVec;
     math::Spline<jp_type>* jpSpline;
@@ -108,6 +114,13 @@ template<size_t DOF>
     Eigen::Quaterniond ortn_cmd;
     pose_type pose_cmd;
     systems::Ramp ramp;
+
+    // Data logging
+    char tmpLogFile[100];
+    char csvLogFile[100];
+    systems::TupleGrouper<double, double, jp_type, jp_type, jv_type, jt_type> jpLog_tuple_grouper;
+    systems::PeriodicDataLogger<jpLog_tuple_type> * data_logger;
+    systems::dTime sys_dtime;
 
     //Subscribers
     ros::Subscriber cart_traj_sub;
@@ -185,14 +198,12 @@ template<size_t DOF>
     handSpreadVel(wam_common::BHandSpreadVel::Request &req, wam_common::BHandSpreadVel::Response &res);
     void
     cartTrajCB(const wam_common::CartPointTraj::ConstPtr& msg);
-    void
+    void  
     jointTrajCB(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
     void
     publishWam(ProductManager& pm);
     void
     publishHand(void);
-    void
-    updateRT(ProductManager& pm);
   };
 
 // Templated Initialization Function
@@ -261,7 +272,7 @@ template<size_t DOF>
       bhand_joint_state_pub = nh_.advertise < sensor_msgs::JointState > ("joint_states", 1); // bhand/joint_states
 
       //Advertise the following services only if there is a BarrettHand present
-      hand_open_grsp_srv = nh_.advertiseService("open_grasp", &WamNode<DOF>::handOpenGrasp, this); // bhand/open_grasp
+      hand_open_grsp_srv = nh_.advertiseService("open_grasp", &WamNode::handOpenGrasp, this); // bhand/open_grasp
       hand_close_grsp_srv = nh_.advertiseService("close_grasp", &WamNode::handCloseGrasp, this); // bhand/close_grasp
       hand_open_sprd_srv = nh_.advertiseService("open_spread", &WamNode::handOpenSpread, this); // bhand/open_spread
       hand_close_sprd_srv = nh_.advertiseService("close_spread", &WamNode::handCloseSpread, this); // bhand/close_spread
@@ -312,12 +323,39 @@ template<size_t DOF>
     ortn_move_srv = n_.advertiseService("ortn_move", &WamNode::ortnMove, this); // wam/ortn_move
 
 
+    // Data Logging
+    if (LOG_DATA) {
+      strcpy(tmpLogFile, "/tmp/dataLogXXXXXX");
+      strcpy(csvLogFile, "/home/robot/dataLog.csv");
+      data_logger = new systems::PeriodicDataLogger<jpLog_tuple_type>( pm.getExecutionManager(),
+      new log::RealTimeWriter<jpLog_tuple_type>(tmpLogFile, pm.getExecutionManager()->getPeriod()),
+      1);
+    } 
+
   }
 
 template<size_t DOF>
   void WamNode<DOF>::close(ProductManager& pm)
   {
    
+    // Data Logging
+    if (LOG_DATA) {
+
+      data_logger->closeLog();
+      printf("Logging stopped.\n");
+
+      log::Reader<jpLog_tuple_type> lr(tmpLogFile);
+   
+      if (std:: ifstream(csvLogFile)) {
+        std::remove(csvLogFile);
+      }
+
+      lr.exportCSV(csvLogFile);
+      printf("Output written to %s.\n", csvLogFile);
+      std::remove(tmpLogFile);
+    }
+
+
     wam.moveTo(jp_init);
 
     if (hand != NULL)
@@ -433,7 +471,6 @@ template<size_t DOF>
 
     pose_cmd = boost::make_tuple(cp_cmd, ortn_cmd);
     /* Sasha: test this. */
-
     //wam.moveTo(pose_cmd, false); //(TODO:KM Update Libbarrett API for Pose Moves)
     ROS_INFO("Pose Commands for WAM not yet supported by API");
     return false;
@@ -618,7 +655,7 @@ template<size_t DOF>
       boost::get<0>(jpSamp) = msg->points[i].time_from_start.toSec();
       
       if (i==i_start) {
-        //Replace starting point with current pos.
+        //Replace starting point with current pos.    
         jp_type jp_curr = wam.getJointPositions();
         for (size_t j = 0; j < DOF; j++) {
           boost::get<1>(jpSamp)[j] = jp_curr[j];
@@ -636,6 +673,20 @@ template<size_t DOF>
     jpSpline = new math::Spline<jp_type>(*jpVec);
     jpTrajectory = new systems::Callback<double, jp_type>(boost::ref(*jpSpline));
     systems::forceConnect(ramp.output, jpTrajectory->input);
+
+    // Data Logging
+    if (LOG_DATA) {
+      systems::forceConnect(ramp.output, sys_dtime.input);
+
+      systems::forceConnect(sys_dtime.output, jpLog_tuple_grouper.template getInput<0>());
+      systems::forceConnect(ramp.output, jpLog_tuple_grouper.template getInput<1>());
+      systems::forceConnect(jpTrajectory->output, jpLog_tuple_grouper.template getInput<2>());
+      systems::forceConnect(wam.jpOutput, jpLog_tuple_grouper.template getInput<3>());
+      systems::forceConnect(wam.jvOutput, jpLog_tuple_grouper.template getInput<4>());
+      systems::forceConnect(wam.jtSum.output, jpLog_tuple_grouper.template getInput<5>());
+
+      systems::forceConnect(jpLog_tuple_grouper.output, data_logger->input);
+    }
 
     ramp.stop();
     ramp.reset();
@@ -678,7 +729,7 @@ template<size_t DOF>
     cpTrajectory = new systems::Callback<double, cp_type>(boost::ref(*cpSpline));
     systems::forceConnect(ramp.output, cpTrajectory->input);
 
-    // ramp.stop();
+    ramp.stop();
     ramp.reset();
     ramp.setOutput(cpSpline->initialS());
     wam.trackReferenceSignal(cpTrajectory->output);
@@ -758,7 +809,7 @@ template<size_t DOF>
 
     if (pm.getHand())
       boost::thread handPubThread(&WamNode<DOF>::publishHand, &wam_node);
-
+    
     while (ros::ok() && pm.getSafetyModule()->getMode() == SafetyModule::ACTIVE)
     {
       try
@@ -776,4 +827,4 @@ template<size_t DOF>
     // Safe close
     wam_node.close(pm);
     return 0;
-  }
+  } 

@@ -35,9 +35,8 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 	/usr/include/eigen2/
 	/usr/include/xenomai/
+	include
 )
-
-include_directories(include ${catkin_INCLUDE_DIRS})
 
 add_executable(wam_node src/wam_node.cpp)
 target_link_libraries(wam_node ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
