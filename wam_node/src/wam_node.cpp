@@ -1,37 +1,10 @@
-/*
- Copyright 2012 Barrett Technology <support@barrett.com>
-
- This file is part of barrett-ros-pkg.
-
- This version of barrett-ros-pkg is free software: you can redistribute it
- and/or modify it under the terms of the GNU General Public License as
- published by the Free Software Foundation, either version 3 of the
- License, or (at your option) any later version.
-
- This version of barrett-ros-pkg is distributed in the hope that it will be
- useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
- MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- GNU General Public License for more details.
-
- You should have received a copy of the GNU General Public License along
- with this version of barrett-ros-pkg.  If not, see
- <http://www.gnu.org/licenses/>.
-
- Barrett Technology holds all copyrights on barrett-ros-pkg. As the sole
- copyright holder, Barrett reserves the right to release future versions
- of barrett-ros-pkg under a different license.
-
- File: wam_node.cpp
- Date: 5 June, 2012
- Author: Kyle Maroney
- */
 #include <unistd.h>
 #include <math.h>
 #include <ctime>
 #include <cstdlib>
 #include <fstream>
 
-#include <boost/thread.hpp> // BarrettHand threading
+#include <boost/thread.hpp>
 #include <boost/bind.hpp>
 #include <Eigen/Core>
 
@@ -67,22 +40,21 @@
 #include <barrett/log.h>
 
 #include "sys_time.h"
+#include "gains.h"
 
 typedef tf::Quaternion btQuaternion;
 typedef tf::Matrix3x3 btMatrix3x3;
 
 using namespace barrett;
 
-static const bool LOG_DATA = true;
+static const bool LOG_DATA = true;  
 static const int PUBLISH_FREQ = 250; // Default Control Loop / Publishing Frequency
 // BHand publishing currently experiencing latency (65-75% of target Hz)
 static const int BHAND_PUBLISH_FREQ = 250; // Publishing Frequency for the BarretHand
 static const double SPEED = 0.5; // Default Cartesian Velocity
-static const double TORQUE_LIM = 1.5;
-static const double JP_VEL_LIM = 1.0;
-// static const double JP_VEL_LIM = 0.5;
+static const double TORQUE_LIM = 3.0;
+static const double JP_VEL_LIM = 1.5;
 static const double TRANSITION_DURATION = 0.5;  // seconds
-
 
 //WamNode Class
 template<size_t DOF>
@@ -214,6 +186,23 @@ template<size_t DOF>
     ros::NodeHandle nh_("bhand"); // BarrettHand specific nodehandle
 
     pm.getExecutionManager()->startManaging(ramp); //starting ramp manager
+
+    // Print and Set Gains
+    printGains(wam);
+
+    // Default values
+    // double jp_Kp[] = {900., 2500., 600., 500., 50., 50., 8.};
+    // double jp_Kd[] = {10., 20., 5., 2., 0.5, 0.5, 0.05};
+    // double jp_Ki[] = {2.5, 5, 2, 0.5, 0.5, 0.5, 0.1};
+
+    double jp_Kp[] = {1500., 2500., 600., 500., 50., 50., 50.};
+    double jp_Kd[] = {50., 20., 5., 2., 0.5, 0.5, 0.05};
+    double jp_Ki[] = {25., 10., 4., 1., 5., 5., 5.};
+
+    setJpGains<DOF>(wam, jp_Kp, jp_Kd, jp_Ki);
+
+    printGains(wam);
+
 
     ROS_INFO(" \n %zu-DOF WAM", DOF);
 
@@ -650,21 +639,40 @@ template<size_t DOF>
     //   }
     // }   
 
+    jp_type jp_curr = wam.getJointPositions();
+
     for (size_t i = i_start; i < n_pts; i++)
     {   
       boost::get<0>(jpSamp) = msg->points[i].time_from_start.toSec();
       
       if (i==i_start) {
         //Replace starting point with current pos.    
-        jp_type jp_curr = wam.getJointPositions();
         for (size_t j = 0; j < DOF; j++) {
           boost::get<1>(jpSamp)[j] = jp_curr[j];
         }
+
+        /********* DEBUG: Fix last 6 DOFs **********/
+        // // boost::get<1>(jpSamp)[1] = -1.91256 ;
+        // boost::get<1>(jpSamp)[2] =  1.47136 ;
+        // boost::get<1>(jpSamp)[3] =  1.2343 ;
+        // boost::get<1>(jpSamp)[4] =  0.300391 ;
+        // boost::get<1>(jpSamp)[5] =  1.13839 ;
+        // boost::get<1>(jpSamp)[6] =  -1.61063 ;
+        /******************************************/ 
       }
       else {
         for (size_t j = 0; j < DOF; j++) {
           boost::get<1>(jpSamp)[j] = msg->points[i].positions[j];
         } 
+
+        /********* DEBUG: Fix last 6 DOFs **********/
+        // // boost::get<1>(jpSamp)[1] = -1.91256 ;
+        // boost::get<1>(jpSamp)[2] =  1.47136 ;
+        // boost::get<1>(jpSamp)[3] =  1.2343 ;
+        // boost::get<1>(jpSamp)[4] =  0.300391 ;
+        // boost::get<1>(jpSamp)[5] =  1.13839 ;
+        // boost::get<1>(jpSamp)[6] =  -1.61063 ;
+        /******************************************/ 
       }
 
       jpVec->push_back(jpSamp);
