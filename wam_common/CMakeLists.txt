@@ -50,6 +50,7 @@ find_package(catkin REQUIRED COMPONENTS
    FILES
    CartPointTraj.msg
    JointTraj.msg
+   ForceTorque.msg
   )
 
 # Generate services in the 'srv' folder
