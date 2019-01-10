@@ -13,6 +13,7 @@
 
 #include "wam_common/CartPointTraj.h"
 #include "wam_common/JointTraj.h"
+#include "wam_common/ForceTorque.h"
 #include "wam_common/GravityComp.h"
 #include "wam_common/Hold.h"
 #include "wam_common/JointMove.h"
@@ -38,6 +39,8 @@
 #include <barrett/systems/wam.h>
 #include <barrett/detail/stl_utils.h>
 #include <barrett/log.h>
+#include <barrett/products/force_torque_sensor.h>
+
 
 #include "sys_time.h"
 #include "gains.h"
@@ -80,6 +83,7 @@ template<size_t DOF>
 
     systems::Wam<DOF>& wam;
     Hand* hand;
+    ForceTorqueSensor* ft_sensor;
     hjp_type hjp_init;
     jp_type jp, jp_cmd, jp_home, jp_init;
     cp_type cp_cmd, rt_cv_cmd;
@@ -101,9 +105,10 @@ template<size_t DOF>
     //Published Topics
     sensor_msgs::JointState wam_joint_state, bhand_joint_state;
     geometry_msgs::PoseStamped wam_pose;
+    wam_common::ForceTorque ft_sensor_state;
 
     //Publishers
-    ros::Publisher wam_joint_state_pub, bhand_joint_state_pub, wam_pose_pub;
+    ros::Publisher wam_joint_state_pub, bhand_joint_state_pub, wam_pose_pub, ft_sensor_pub;
 
     //Services
     ros::ServiceServer gravity_srv, go_home_srv, go_init_srv, hold_jpos_srv, hold_cpos_srv;
@@ -174,6 +179,8 @@ template<size_t DOF>
     jointTrajCB(const trajectory_msgs::JointTrajectory::ConstPtr& msg);
     void
     publishWam(ProductManager& pm);
+    void  
+    publishFT(ProductManager& pm);
     void
     publishHand(void);
   };
@@ -186,6 +193,9 @@ template<size_t DOF>
     ros::NodeHandle nh_("bhand"); // BarrettHand specific nodehandle
 
     pm.getExecutionManager()->startManaging(ramp); //starting ramp manager
+
+    // ft_sensor.update();
+    ft_sensor = pm.getForceTorqueSensor();
 
     // Print and Set Gains
     printGains(wam);
@@ -202,7 +212,6 @@ template<size_t DOF>
     setJpGains<DOF>(wam, jp_Kp, jp_Kd, jp_Ki);
 
     printGains(wam);
-
 
     ROS_INFO(" \n %zu-DOF WAM", DOF);
 
@@ -221,6 +230,7 @@ template<size_t DOF>
 
     usleep(500000);
     wam.moveTo(jp_init);
+
 
     if (pm.foundHand()) //Does the following only if a BarrettHand is present
     {
@@ -295,6 +305,7 @@ template<size_t DOF>
     //Publishing the following rostopicss
     wam_joint_state_pub = n_.advertise < sensor_msgs::JointState > ("joint_states", 1); // wam/joint_states
     wam_pose_pub = n_.advertise < geometry_msgs::PoseStamped > ("pose", 1); // wam/pose
+    ft_sensor_pub = n_.advertise < wam_common::ForceTorque > ("ft_sensor", 1); // wam/ft_sensor
 
     //Subscribing to the following rostopics
     cart_traj_sub = n_.subscribe("cart_traj_cmd", 1, &WamNode::cartTrajCB, this); 
@@ -785,6 +796,35 @@ template<size_t DOF>
     wam_pose_pub.publish(wam_pose);
   }
 
+  //Function to update the WAM publisher
+template<size_t DOF>
+  void WamNode<DOF>::publishFT(ProductManager& pm)
+  {
+
+    ft_sensor->update(true);
+    ft_sensor->updateAccel(true);
+
+    //Current values to be published
+    cf_type cf = ft_sensor->getForce();
+    ct_type ct = ft_sensor->getTorque();
+    ca_type ca = ft_sensor->getAccel(); 
+
+    //publishing sensor_msgs/JointState to wam/force_torque
+    ft_sensor_state.force.x = cf[0];
+    ft_sensor_state.force.y = cf[1];  
+    ft_sensor_state.force.z = cf[2];
+    ft_sensor_state.torque.x = ct[0];
+    ft_sensor_state.torque.y = ct[1];
+    ft_sensor_state.torque.z = ct[2];
+    ft_sensor_state.accel.x = ca[0];
+    ft_sensor_state.accel.y = ca[1];
+    ft_sensor_state.accel.z = ca[2];
+
+    ft_sensor_state.header.stamp = ros::Time::now();
+    ft_sensor_pub.publish(ft_sensor_state);
+  }
+
+
 //Function to update the real-time control loops
 template<size_t DOF>
   void WamNode<DOF>::publishHand() //systems::PeriodicDataLogger<debug_tuple>& logger
@@ -824,6 +864,7 @@ template<size_t DOF>
       {
         ros::spinOnce();
         wam_node.publishWam(pm);
+        wam_node.publishFT(pm);
         pub_rate.sleep();
       }
       catch (const std::exception &e)
