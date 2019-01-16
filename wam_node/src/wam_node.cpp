@@ -204,7 +204,10 @@ template<size_t DOF>
     
     //Set control gains
     control_manager_ptr = new ControlManager<DOF>(wam,n_,wam_config);
+
+    control_manager_ptr->printGains();
     control_manager_ptr->setGains();
+    control_manager_ptr->printGains();
 
     // initialize FT sensor
     ft_sensor = pm.getForceTorqueSensor();
@@ -438,14 +441,34 @@ template<size_t DOF>
 template<size_t DOF>
   bool WamNode<DOF>::jointMove(wam_common::JointMove::Request &req, wam_common::JointMove::Response &res)
   {
-    if (req.joints.size() != DOF)
-    {
-      ROS_INFO("Request Failed: %zu-DOF request received, must be %zu-DOF", req.joints.size(), DOF);
+
+    // Request Checking
+    if (req.joints.size() != wam_config.plan_DOF) {
+      ROS_INFO("Request Failed: %zu-DOF request received. Planning messages set to %zu-DOF in config.", req.joints.size(), wam_config.plan_DOF);
       return false;
     }
-    ROS_INFO("Moving Robot to Commanded Joint Pose");
-    for (size_t i = 0; i < DOF; i++)
+    else if (req.joints.size() > DOF) {
+      ROS_INFO("Request Failed: %zu-DOF request received. This exceeds the %zu-DOF of the system.", req.joints.size(), DOF);
+      return false;
+    }
+
+    // Set move goal 
+    for (size_t i = 0; i < wam_config.plan_DOF; i++) {
       jp_cmd[i] = req.joints[i];
+    }
+
+    // Set remaining joints to maintain current value
+    if (wam_config.plan_DOF < DOF) {
+
+      jp_type jp_curr = wam.getJointPositions();
+
+      for (size_t i = wam_config.plan_DOF; i < DOF; i++) {
+        jp_cmd[i] = jp_curr[i];
+      }
+
+    }
+
+    ROS_INFO("Moving Robot to Commanded Joint Pose");
     wam.moveTo(jp_cmd, true);
 
     return true;
@@ -653,7 +676,7 @@ template<size_t DOF>
       boost::get<0>(jpSamp) = msg->points[i].time_from_start.toSec();
       
       if (i==i_start) {
-        //Replace starting point with current pos.    
+        //Replace starting point with current pos for all system DOFs  
         for (size_t j = 0; j < DOF; j++) {
           boost::get<1>(jpSamp)[j] = jp_curr[j];
         }
@@ -668,9 +691,16 @@ template<size_t DOF>
         /******************************************/ 
       }
       else {
-        for (size_t j = 0; j < DOF; j++) {
+        // Read message for joints up to plan_DOF
+        for (size_t j = 0; j < wam_config.plan_DOF; j++) {
           boost::get<1>(jpSamp)[j] = msg->points[i].positions[j];
         } 
+        // Fix remaining joints to maintain current position
+        if (wam_config.plan_DOF < DOF) {
+          for (size_t j = wam_config.plan_DOF; j < DOF; j++) {
+            boost::get<1>(jpSamp)[j] = jp_curr[j];
+          }
+        }
 
         /********* DEBUG: Fix last 6 DOFs **********/
         // // boost::get<1>(jpSamp)[1] = -1.91256 ;

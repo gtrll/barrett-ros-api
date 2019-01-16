@@ -10,7 +10,7 @@ class WamConfig
 {
 
 public:
-	int plan_DOF;
+	size_t plan_DOF;
 	std::vector<double> Jp_Kp, Jp_Kd, Jp_Ki, Jp_uLim, Jp_iLim;
 	std::vector<double> Jv_Kp, Jv_Kd, Jv_Ki, Jv_uLim, Jv_iLim;
 	bool use_default_JpGains;

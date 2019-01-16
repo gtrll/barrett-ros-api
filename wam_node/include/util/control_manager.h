@@ -73,8 +73,8 @@ void ControlManager<DOF>::setJpGains() {
 
   for (size_t j=0; j<DOF; j++) {
     Ks_.position.Kp[j]=wam_c_.Jp_Kp[j];
-    Ks_.position.Kd[j]=wam_c_.Jp_Ki[j];
-    Ks_.position.Ki[j]=wam_c_.Jp_Kp[j];
+    Ks_.position.Kd[j]=wam_c_.Jp_Kd[j];
+    Ks_.position.Ki[j]=wam_c_.Jp_Ki[j];
     Ks_.position.iLim[j]=wam_c_.Jp_iLim[j];
     Ks_.position.uLim[j]=wam_c_.Jp_uLim[j];
   }  
@@ -92,17 +92,19 @@ void ControlManager<DOF>::setJvGains() {
  
   for (size_t j=0; j<DOF; j++) {
     Ks_.velocity.Kp[j]=wam_c_.Jv_Kp[j];
-    Ks_.velocity.Kd[j]=wam_c_.Jv_Ki[j];
-    Ks_.velocity.Ki[j]=wam_c_.Jv_Kp[j];
+    Ks_.velocity.Kd[j]=wam_c_.Jv_Kd[j];
+    Ks_.velocity.Ki[j]=wam_c_.Jv_Ki[j];
     Ks_.velocity.iLim[j]=wam_c_.Jv_iLim[j];
     Ks_.velocity.uLim[j]=wam_c_.Jv_uLim[j];
   }  
 
-  wam_.jpController.setKp(Ks_.velocity.Kp);
-  wam_.jpController.setKd(Ks_.velocity.Kd);
-  wam_.jpController.setKi(Ks_.velocity.Ki);
-  wam_.jpController.setIntegratorLimit(Ks_.velocity.iLim);
-  wam_.jpController.setControlSignalLimit(Ks_.velocity.uLim);
+  wam_.jvController1.setKp(Ks_.velocity.Kp);
+  wam_.jvController1.setKd(Ks_.velocity.Kd);
+  wam_.jvController1.setKi(Ks_.velocity.Ki);
+  wam_.jvController1.setIntegratorLimit(Ks_.velocity.iLim);
+  wam_.jvController1.setControlSignalLimit(Ks_.velocity.uLim);
+
+  /***Note***: jvController1 is passed to jvController2 (FirsOrderFilter type) */
 
 }
 
@@ -160,5 +162,5 @@ void ControlManager<DOF>::printGains() {
            i_lim.str().c_str(),
            u_lim.str().c_str()
         );
-    }
+    } 
 }

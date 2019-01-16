@@ -7,7 +7,9 @@ WamConfig::WamConfig (ros::NodeHandle nh, size_t DOF) {
 	ROS_INFO("Loading WAM config parameters.");
 
 	if (nh.hasParam("planning/DOF")) {
-		nh.getParam("planning/DOF", plan_DOF);
+		int tmp;
+		nh.getParam("planning/DOF",tmp);
+		plan_DOF=size_t(tmp);
 	} else {
 		ROS_ERROR("You must specify planning DOFs.");
 	}
