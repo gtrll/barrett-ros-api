@@ -1,3 +1,5 @@
+#pragma once
+
 #include <barrett/os.h>
 #include <barrett/systems/abstract/system.h>
 #include <barrett/systems/abstract/single_io.h>
@@ -5,7 +7,7 @@
 namespace barrett {
 namespace systems {
 
-/* System class providing realtime for xenomai timestamp */
+// System class providing realtime for xenomai timestamp
 class Time : public System,
              public SingleInput<double>,
              public SingleOutput<double> {
@@ -33,7 +35,7 @@ class Time : public System,
     };
 
 
-/* System class providing realtime delta for xenomai timestamp */
+// System class providing realtime delta for xenomai timestamp
 class dTime : public System,
              public SingleInput<double>,
              public SingleOutput<double> {

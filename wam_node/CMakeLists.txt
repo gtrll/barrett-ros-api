@@ -36,10 +36,14 @@ include_directories(
 	/usr/include/eigen2/
 	/usr/include/xenomai/
 	include
+	include/util
 )
 
+file(GLOB LIB_SRC "src/util/*.cpp")
+add_library(wam_util ${LIB_SRC})
+
 add_executable(wam_node src/wam_node.cpp)
-target_link_libraries(wam_node ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl)
+target_link_libraries(wam_node ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl wam_util)
 
 link_directories (BARRETT_LIBRARY_DIRS)
 

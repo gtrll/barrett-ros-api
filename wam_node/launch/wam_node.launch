@@ -1,4 +1,11 @@
+<?xml version="1.0"?>
 <launch>
+  <!-- <arg name="config" default="wam_7dof" /> -->
+  <arg name="config" default="wam_6dof_probe" />
+
+  <rosparam command="load" file="$(find wam_node)/config/$(arg config).yaml" />
+
   <node name="wam_node" type="wam_node" pkg="wam_node" output="screen" />
+
 </launch>
 
