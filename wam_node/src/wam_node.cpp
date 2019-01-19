@@ -29,6 +29,7 @@
 #include "std_srvs/Empty.h"
 #include "sensor_msgs/JointState.h"
 #include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/WrenchStamped.h"
 #include "trajectory_msgs/JointTrajectory.h"
 
 #include <barrett/math.h> 
@@ -108,7 +109,7 @@ template<size_t DOF>
     //Published Topics
     sensor_msgs::JointState wam_joint_state, bhand_joint_state;
     geometry_msgs::PoseStamped wam_pose;
-    wam_common::ForceTorque ft_sensor_state;
+    geometry_msgs::WrenchStamped ft_sensor_state;
 
     //Publishers
     ros::Publisher wam_joint_state_pub, bhand_joint_state_pub, wam_pose_pub, ft_sensor_pub;
@@ -304,7 +305,8 @@ template<size_t DOF>
     //Publishing the following rostopicss
     wam_joint_state_pub = n_.advertise < sensor_msgs::JointState > ("joint_states", 1); // wam/joint_states
     wam_pose_pub = n_.advertise < geometry_msgs::PoseStamped > ("pose", 1); // wam/pose
-    ft_sensor_pub = n_.advertise < wam_common::ForceTorque > ("ft_sensor", 1); // wam/ft_sensor
+    // ft_sensor_pub = n_.advertise < wam_common::ForceTorque > ("ft_sensor", 1); // wam/ft_sensor
+    ft_sensor_pub = n_.advertise < geometry_msgs::WrenchStamped > ("ft_sensor", 1); // wam/ft_sensor
 
     //Subscribing to the following rostopics
     cart_traj_sub = n_.subscribe("cart_traj_cmd", 1, &WamNode::cartTrajCB, this); 
@@ -828,24 +830,25 @@ template<size_t DOF>
   {
 
     ft_sensor->update(true);
-    ft_sensor->updateAccel(true);
+    // ft_sensor->updateAccel(true);
 
     //Current values to be published
     cf_type cf = ft_sensor->getForce();
     ct_type ct = ft_sensor->getTorque();
-    ca_type ca = ft_sensor->getAccel(); 
+    // ca_type ca = ft_sensor->getAccel(); 
 
-    //publishing sensor_msgs/JointState to wam/force_torque
-    ft_sensor_state.force.x = cf[0];
-    ft_sensor_state.force.y = cf[1];  
-    ft_sensor_state.force.z = cf[2];
-    ft_sensor_state.torque.x = ct[0];
-    ft_sensor_state.torque.y = ct[1];
-    ft_sensor_state.torque.z = ct[2];
-    ft_sensor_state.accel.x = ca[0];
-    ft_sensor_state.accel.y = ca[1];
-    ft_sensor_state.accel.z = ca[2];
+    //publishing wam/force_torque
+    ft_sensor_state.wrench.force.x = cf[0];
+    ft_sensor_state.wrench.force.y = cf[1];  
+    ft_sensor_state.wrench.force.z = cf[2];
+    ft_sensor_state.wrench.torque.x = ct[0];
+    ft_sensor_state.wrench.torque.y = ct[1];
+    ft_sensor_state.wrench.torque.z = ct[2];
+    // ft_sensor_state.accel.x = ca[0];
+    // ft_sensor_state.accel.y = ca[1];
+    // ft_sensor_state.accel.z = ca[2];
 
+    ft_sensor_state.header.frame_id = "wam/ft_sensor_link";
     ft_sensor_state.header.stamp = ros::Time::now();
     ft_sensor_pub.publish(ft_sensor_state);
   }
