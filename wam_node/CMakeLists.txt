@@ -45,6 +45,9 @@ add_library(wam_util ${LIB_SRC})
 add_executable(wam_node src/wam_node.cpp)
 target_link_libraries(wam_node ${catkin_LIBRARIES} ${BARRETT_LIBRARIES} gsl wam_util)
 
+add_executable(ft_filter src/ft_filter.cpp)
+target_link_libraries(ft_filter ${catkin_LIBRARIES})
+
 link_directories (BARRETT_LIBRARY_DIRS)
 
 

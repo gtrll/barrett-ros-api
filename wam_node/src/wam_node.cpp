@@ -306,7 +306,8 @@ template<size_t DOF>
     wam_joint_state_pub = n_.advertise < sensor_msgs::JointState > ("joint_states", 1); // wam/joint_states
     wam_pose_pub = n_.advertise < geometry_msgs::PoseStamped > ("pose", 1); // wam/pose
     // ft_sensor_pub = n_.advertise < wam_common::ForceTorque > ("ft_sensor", 1); // wam/ft_sensor
-    ft_sensor_pub = n_.advertise < geometry_msgs::WrenchStamped > ("ft_sensor", 1); // wam/ft_sensor
+    ft_sensor_pub = n_.advertise < geometry_msgs::WrenchStamped > ("ft_sensor/raw", 1); // wam/ft_sensor
+    ft_sensor_pub = n_.advertise < geometry_msgs::WrenchStamped > ("ft_sensor/raw", 1); // wam/ft_sensor
 
     //Subscribing to the following rostopics
     cart_traj_sub = n_.subscribe("cart_traj_cmd", 1, &WamNode::cartTrajCB, this); 
