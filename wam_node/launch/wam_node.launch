@@ -1,11 +1,25 @@
 <?xml version="1.0"?>
 <launch>
+
   <!-- <arg name="config" default="wam_7dof" /> -->
   <arg name="config" default="wam_6dof_probe" />
+  <arg name="use_ft_sensor" default="true" />
 
+  <!-- Robot configuration -->
   <rosparam command="load" file="$(find wam_node)/config/$(arg config).yaml" />
 
+  <!-- WAM ros interface -->
   <node name="wam_node" type="wam_node" pkg="wam_node" output="screen" />
+
+	<!-- Launch force-torque filtering -->
+	<group if="$(arg use_ft_sensor)">
+		<node name="ft_filter" type="ft_filter" pkg="wam_node" output="screen" >
+		  	<remap from="ft_topic" to="wam/ft_sensor/raw" />
+		  	<remap from="filter_topic" to="wam/ft_sensor/filtered" />
+		  	<param name="frame_id" value="wam/ft_sensor_link"/>
+		</node>
+	</group>
+
 
 </launch>
 

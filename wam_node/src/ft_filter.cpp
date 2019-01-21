@@ -19,6 +19,8 @@ class ForceTorqueFilter {
 		ros::Subscriber ft_sub_;
 		ros::Publisher ft_pub_;
 
+		bool init_;
+
 		uint win_size_;
 		std::deque <geometry_msgs::Wrench> msg_buff_;
 
@@ -32,21 +34,18 @@ class ForceTorqueFilter {
 		void publish();
 };
 	
-ForceTorqueFilter::ForceTorqueFilter (uint win_size) : win_size_(win_size) {
+ForceTorqueFilter::ForceTorqueFilter (uint win_size) : win_size_(win_size){
 
-	nh_.param<std::string>("ft_topic", ft_topic_, "wam/ft_sensor/raw");
-	nh_.param<std::string>("filter_topic", filter_topic_, "wam/ft_sensor/filtered");
-	nh_.param<std::string>("frame_id", frame_id_, "wam/ft_sensor_link");
-	
-	ft_sub_ = nh_.subscribe(ft_topic_, 1, &ForceTorqueFilter::listenerCB, this);
+	ft_sub_ = nh_.subscribe("ft_topic", 1, &ForceTorqueFilter::listenerCB, this);
 	// wait for queue to populate
 	ros::Duration(1.0).sleep();
 
-	// Calc init offset wrench
-	// FIXME: getting NaNs here
-	w_offset_ = getMean_();
+	nh_.getParam("ft_filter/frame_id", frame_id_);
+	std::cout << "frame_id : " << frame_id_ << std::endl; 
 
-	ft_pub_ = nh_.advertise<geometry_msgs::WrenchStamped> (filter_topic_,1);
+	ft_pub_ = nh_.advertise<geometry_msgs::WrenchStamped> ("filter_topic",1);
+
+	init_=true;
 	
 }
 
@@ -61,11 +60,14 @@ void ForceTorqueFilter::publish() {
 
 	geometry_msgs::WrenchStamped msg_out;
 
-	// geometry_msgs::Wrench w_mean = getMean_();
-	// msg_out.wrench = subWrench_(w_mean, w_offset_);
-	// msg_out.wrench = w_offset_;
+	// Get initial offset
+	if (init_) {
+		w_offset_ = getMean_();
+		init_=false;
+	}
 
-	msg_out.wrench = getMean_();
+	// Subtract offset from mean
+	msg_out.wrench = subWrench_(getMean_(), w_offset_);
 
 	msg_out.header.frame_id = frame_id_;
 	msg_out.header.stamp = ros::Time::now();
@@ -88,6 +90,7 @@ geometry_msgs::Wrench ForceTorqueFilter::getMean_() {
 		w_mean.torque.y += msg_buff_.at(i).torque.y;
 		w_mean.torque.z += msg_buff_.at(i).torque.z;
 	}	
+
 
 	w_mean.force.x  = w_mean.force.x / msg_buff_.size();
 	w_mean.force.y  = w_mean.force.y / msg_buff_.size();
@@ -113,7 +116,6 @@ geometry_msgs::Wrench ForceTorqueFilter::subWrench_ (const geometry_msgs::Wrench
 
 	return w_out;
 }
-
 
 
 
