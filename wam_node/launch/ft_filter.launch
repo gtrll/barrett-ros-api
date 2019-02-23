@@ -1,10 +1,7 @@
 <?xml version="1.0"?>
 <launch>
 
-<node name="ft_filter" type="ft_filter" pkg="wam_node" output="screen" >
-  	<remap from="ft_topic" to="wam/ft_sensor/raw" />
-  	<remap from="filter_topic" to="wam/ft_sensor/filtered" />
-  	<param name="frame_id" value="wam/ft_sensor_link"/>
-</node>
+	<include file="$(find wam_node)/launch/ft_filter_mocap.launch"/>
+	<include file="$(find wam_node)/launch/ft_filter_dart.launch"/>
 
 </launch>	

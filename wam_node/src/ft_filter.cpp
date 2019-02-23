@@ -36,14 +36,18 @@ class ForceTorqueFilter {
 	
 ForceTorqueFilter::ForceTorqueFilter (uint win_size) : win_size_(win_size){
 
-	ft_sub_ = nh_.subscribe("ft_topic", 1, &ForceTorqueFilter::listenerCB, this);
+	nh_ = ros::NodeHandle("~");
+
+	nh_.getParam("ft_topic", ft_topic_);
+	nh_.getParam("filter_topic", filter_topic_);
+
+	ft_sub_ = nh_.subscribe(ft_topic_, 1, &ForceTorqueFilter::listenerCB, this);
 	// wait for queue to populate
 	ros::Duration(1.0).sleep();
 
-	nh_.getParam("ft_filter/frame_id", frame_id_);
-	std::cout << "frame_id : " << frame_id_ << std::endl; 
+	nh_.getParam("frame_id", frame_id_);
 
-	ft_pub_ = nh_.advertise<geometry_msgs::WrenchStamped> ("filter_topic",1);
+	ft_pub_ = nh_.advertise<geometry_msgs::WrenchStamped> (filter_topic_,1);
 
 	init_=true;
 	

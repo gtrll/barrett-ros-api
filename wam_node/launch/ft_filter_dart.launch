@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+
+<node name="ft_filter_dart" type="ft_filter" pkg="wam_node" output="screen" >
+  	<param name="ft_topic" value="/wam/ft_sensor/raw" />
+  	<param name="filter_topic" value="/tracker/wam/ft_sensor/filtered" />
+  	<param name="frame_id" value="tracker/wam/ft_sensor_link"/>
+</node>
+
+</launch>	

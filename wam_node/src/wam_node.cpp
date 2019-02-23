@@ -86,7 +86,7 @@ template<size_t DOF>
     Hand* hand;
     ForceTorqueSensor* ft_sensor;
     hjp_type hjp_init;
-    jp_type jp, jp_cmd, jp_home, jp_init;
+    jp_type jp, jp_cmd, jp_home, jp_init, jp_curr;
     cp_type cp_cmd, rt_cv_cmd;
     Eigen::Quaterniond ortn_cmd;
     pose_type pose_cmd;
@@ -206,9 +206,8 @@ template<size_t DOF>
     //Set control gains
     control_manager_ptr = new ControlManager<DOF>(wam,n_,wam_config);
 
-    control_manager_ptr->printGains();
     control_manager_ptr->setGains();
-    control_manager_ptr->printGains();
+    // control_manager_ptr->printGains();
 
     // initialize FT sensor
     ft_sensor = pm.getForceTorqueSensor();
@@ -439,7 +438,6 @@ template<size_t DOF>
   }
 
 //Function to command a joint space move to the WAM
-/*** Blocking ****/
 template<size_t DOF>
   bool WamNode<DOF>::jointMove(wam_common::JointMove::Request &req, wam_common::JointMove::Response &res)
   {
@@ -454,6 +452,9 @@ template<size_t DOF>
       return false;
     }
 
+    // Get current pose
+    jp_curr = wam.getJointPositions();
+
     // Set move goal 
     for (size_t i = 0; i < wam_config.plan_DOF; i++) {
       jp_cmd[i] = req.joints[i];
@@ -462,8 +463,6 @@ template<size_t DOF>
     // Set remaining joints to maintain current value
     if (wam_config.plan_DOF < DOF) {
 
-      jp_type jp_curr = wam.getJointPositions();
-
       for (size_t i = wam_config.plan_DOF; i < DOF; i++) {
         jp_cmd[i] = jp_curr[i];
       }
@@ -471,10 +470,38 @@ template<size_t DOF>
     }
 
     ROS_INFO("Moving Robot to Commanded Joint Pose");
-    wam.moveTo(jp_cmd, true);
+
+    // wam.moveTo(jp_cmd, true)
+
+    // Handle efault empty vel message
+    if (req.vel == 0) {
+      wam.moveTo(jp_cmd, true); //non-blocking allows states to be published simultaneously
+    } 
+    else if (req.vel > 0) {
+      wam.moveTo(jp_cmd, true, req.vel);
+    } else {
+      ROS_ERROR("Cannot request negative moveTo() velocity.");
+    }
+
+    // bool at_goal = false;
+    // while (!at_goal) {
+      
+    //   at_goal = true;
+    //   jp_curr = wam.getJointPositions();
+    //   for (size_t i = 0; i < wam_config.plan_DOF; i++) {
+    //     if ( std::abs(jp_curr[i] - jp_cmd[i]) > 1.0e-02) {
+    //       at_goal = false;
+    //       break;
+    //     }
+    //   }
+    //   usleep(1000);
+    // }
+
+    ROS_INFO("Joint pose reached.");
 
     return true;
   }
+
 
 //Function to command a pose move to the WAM
 template<size_t DOF>
@@ -660,18 +687,16 @@ template<size_t DOF>
     //   }
     // }
 
-    // Check start pos. matches current
-    //  jp_type jp_curr = wam.getJointPositions();
-    // for (size_t j = 0; j < DOF; j++)
-    // {
-    //   if ( std::abs(jp_curr[j] - msg->points[i_start].positions[j]) > 1.0e-02) 
-    //   {
-    //     ROS_ERROR("Starting joint positions do not match! Dropping trajectory msg.");
-    //     return;
-    //   }
-    // }   
-
-    jp_type jp_curr = wam.getJointPositions();
+    // **SAFETY CHECK **: trajectory must start near current pos.
+     jp_curr = wam.getJointPositions();
+    for (size_t j = 0; j < DOF; j++)
+    {
+      if ( std::abs(jp_curr[j] - msg->points[i_start].positions[j]) > 1.0e-02) 
+      {
+        ROS_ERROR("Starting joint positions do not match! Dropping trajectory msg.");
+        return;
+      }
+    }   
 
     for (size_t i = i_start; i < n_pts; i++)
     {   
@@ -884,6 +909,9 @@ template<size_t DOF>
     wam_node.init(pm);
     ros::Rate pub_rate(PUBLISH_FREQ);
 
+    ros::AsyncSpinner spinner(4); // Use 4 threads
+    spinner.start();
+
     if (pm.getHand())
       boost::thread handPubThread(&WamNode<DOF>::publishHand, &wam_node);
     
@@ -891,7 +919,7 @@ template<size_t DOF>
     {
       try
       {
-        ros::spinOnce();
+        // ros::spinOnce();
         wam_node.publishWam(pm);
         wam_node.publishFT(pm);
         pub_rate.sleep();
