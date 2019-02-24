@@ -475,10 +475,10 @@ template<size_t DOF>
 
     // Handle efault empty vel message
     if (req.vel == 0) {
-      wam.moveTo(jp_cmd, true); //non-blocking allows states to be published simultaneously
+      wam.moveTo(jp_cmd, false); //non-blocking allows states to be published simultaneously
     } 
     else if (req.vel > 0) {
-      wam.moveTo(jp_cmd, true, req.vel);
+      wam.moveTo(jp_cmd, false, req.vel);
     } else {
       ROS_ERROR("Cannot request negative moveTo() velocity.");
     }
@@ -909,9 +909,6 @@ template<size_t DOF>
     wam_node.init(pm);
     ros::Rate pub_rate(PUBLISH_FREQ);
 
-    ros::AsyncSpinner spinner(4); // Use 4 threads
-    spinner.start();
-
     if (pm.getHand())
       boost::thread handPubThread(&WamNode<DOF>::publishHand, &wam_node);
     
@@ -919,7 +916,7 @@ template<size_t DOF>
     {
       try
       {
-        // ros::spinOnce();
+        ros::spinOnce();
         wam_node.publishWam(pm);
         wam_node.publishFT(pm);
         pub_rate.sleep();

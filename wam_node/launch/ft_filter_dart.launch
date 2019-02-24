@@ -7,4 +7,9 @@
   	<param name="frame_id" value="tracker/wam/ft_sensor_link"/>
 </node>
 
+<node name="ft_offset_dart" type="ft_offset" pkg="wam_node" output="screen" >
+  	<param name="ft_topic" value="/wam/ft_sensor/raw" />
+  	<param name="filter_topic" value="/tracker/wam_probe/ft_sensor/raw" />
+  	<param name="frame_id" value="tracker/wam/ft_sensor_link"/>
+</node>
 </launch>	
